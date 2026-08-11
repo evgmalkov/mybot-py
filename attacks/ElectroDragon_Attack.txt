@@ -1,0 +1,17 @@
+ ---- E_Drag Attack -----
+Maximum troops allowed
+E_Drago       10   
+Balloons      15
+Rage          4
+Freeze        3
+cc_spells     1 rage 1 freeze | 3 freezes
+
+Any Siege
+
+Support all heroes
+- Queen
+- BK
+- RC
+- Warden
+- Prince
+- Duke

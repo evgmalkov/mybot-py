@@ -1,0 +1,27 @@
+#!/bin/sh
+# Установка: git config core.hooksPath scripts/git-hooks
+# Блокирует коммит секретов и чувствительного (профили, отладочные png, крупные бинари).
+set -e
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+fail=0
+
+for f in $staged; do
+  case "$f" in
+    profiles/*|*.env|*/.env)
+      echo "BLOCK: чувствительный файл в коммите: $f"; fail=1 ;;
+    *.pyc.bak)
+      echo "BLOCK: .pyc.bak не коммитим: $f"; fail=1 ;;
+  esac
+done
+
+# грубый скан секретов в staged-изменениях
+if git diff --cached -U0 | grep -nEi '(api[_-]?key|secret|password|token)\s*[:=]\s*["'\''][A-Za-z0-9_\-]{12,}' >/dev/null 2>&1; then
+  echo "BLOCK: похоже на секрет в изменениях (api_key/secret/password/token). Проверьте вручную."
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "pre-commit: коммит отклонён."
+  exit 1
+fi

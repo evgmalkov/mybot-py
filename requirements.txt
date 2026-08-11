@@ -1,0 +1,8 @@
+# Python 3.13. Ставить в venv: py -3.13 -m venv .venv && .venv\Scripts\pip install -r requirements.txt
+opencv-python
+numpy
+PyQt5
+uiautomator2
+requests
+packaging
+# adb.exe идёт в комплекте MEmu / в папке adb/ рядом с ботом (не через pip)

@@ -1,0 +1,3 @@
+Use OpenCV template match making. Use full screen shot to locate. NO region filtering.
+
+For the images calibration and accuracy, use a SCREENSHOT then use snipping to snip the icon image from Paint

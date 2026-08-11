@@ -1,0 +1,13 @@
+{
+  "_comment": "Параметры анти-бана (рандомизация поведения). Логика — в коде, значения меняйте тут. tap_jitter_px — разброс точки тапа (px); tap_delay_sec — микропауза после тапа; between_cycles_sec — пауза между циклами; break_chance — вероятность длинного «перерыва» после цикла; break_sec — длительность перерыва. Высадка: deploy_drop_delay_sec — случайная пауза между ЧАНКАМИ высадки (нерегулярный ритм, не как цикл); deploy_chunk — сколько тапов слать одним adb-вызовом (больше = быстрее высадка, но реже проверка stop/боя); deploy_jitter_left/right — разброс точки высадки [dx_min, dx_max, dy_min, dy_max] для левой/правой стороны.",
+  "tap_jitter_px": 5,
+  "tap_delay_sec": [0.08, 0.35],
+  "between_cycles_sec": [8, 25],
+  "break_chance": 0.05,
+  "break_sec": [60, 240],
+  "deploy_drop_delay_sec": [0.02, 0.10],
+  "deploy_chunk": 6,
+  "deploy_jitter_left": [0, 39, -27, 0],
+  "deploy_jitter_right": [-44, 0, -33, 0],
+  "event_potion_target": [800, 430]
+}
