@@ -44,8 +44,7 @@ No venv, no manual paths. Settings go to `settings.json` (from
   Slammer, x4 speed-up, and it dumps any leftover troops at the end.
   - Hero ability on low HP: watches the hero HP bar and fires the ability when it drops. Grand Warden
     fires proactively (`config/heroes.json`). The spell/troop selection is restored after firing.
-  - Won't tap blindly if you interrupt the battle (End Battle / Pause / Stop) — same for MBR-CSV
-    strategies.
+  - Won't tap blindly if you interrupt the battle (End Battle / Pause / Stop).
   - Batched taps (one ADB call per batch) instead of one call per tap.
 - Training (`train/`): composition by icon templates, "army full" by fraction matching.
   - Spell composition kept exact by tile count (`config/army.json`), plus a sanity check on the read
