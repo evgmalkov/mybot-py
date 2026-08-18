@@ -12,8 +12,8 @@
 Farming bot for Clash of Clans on the MEmu emulator. Python 3.13, ADB. Open source, MEmu-native,
 lightweight template-matching vision, no neural-network dependencies.
 
-Stack: Python 3.13, OpenCV, numpy, PyQt5, uiautomator2, ADB, MEmu.
-Version: 1.2.0 (see [`version.py`](version.py)). Author: E. Malkov.
+Stack: Python 3.13, OpenCV, numpy, PyQt5, uiautomator2, ADB, MEmu / LDPlayer.
+Version: 1.3.0 (see [`version.py`](version.py)). Author: E. Malkov.
 
 ## Setup
 Do this once:
@@ -56,9 +56,16 @@ No venv, no manual paths. Settings go to `settings.json` (from
 - Full storages → sleep or account switch (`config/farming.json`, GUI: Stop when full): dark elixir
   by the bar fill, gold and elixir by "stopped growing". No storage cap value needed.
 - Number reading (`vision/digit_ocr.py`): digit-template matching, no OCR library.
-- MEmu control via `memuc` and `.memu` — runs minimized / in the background. MEmu is the only stable
-  platform right now; other emulators are disabled in the GUI (WIP). BlueStacks has an ADB
-  version-conflict fix (its own HD-Adb + reconnect).
+- Multi-process multi-bot (v1.3.0): up to N instances in a single GUI window, each an isolated worker
+  process (`run_from_source.py --worker`, [`worker_run.py`](worker_run.py)) bound to a distinct
+  emulator instance. Process-level isolation of global state (`main.host`/`TABS`/`stop_event`/
+  `pause_event`) removes parallel-control conflicts; per-instance collisions are guarded by a lock
+  port. Each bot has its own configuration, log buffer, statistics (`Stats_{N}.json`) and
+  Start/End/Pause; pause is a file-flag IPC (`profiles/_bot_N.pause`) polled by the worker. The
+  session layout is serialized to `config/bots_layout.json` with optional auto-start on next launch.
+- Emulators: MEmu (via `memuc`/`.memu`) and LDPlayer 14; the emulator and instance are selected at
+  start, instances execute in parallel (one process per bot), running minimized / in the background.
+  BlueStacks has an ADB version-conflict workaround (dedicated HD-Adb + reconnect).
 
 ## Layout
 Flat imports, layers added to `sys.path`:
@@ -66,7 +73,7 @@ Flat imports, layers added to `sys.path`:
 | directory | purpose |
 |---|---|
 | `core/` | bot loop, capture/matching, updates |
-| `emu/` | emulator, ADB, input, screenshots |
+| `emu/` | emulator managers (MEmu / LDPlayer), ADB, input, screenshots |
 | `vision/` | screen recognition |
 | `train/` | army training |
 | `villages/` | walls, Clan Games, request troops |
@@ -74,6 +81,8 @@ Flat imports, layers added to `sys.path`:
 | `attacks/` | attack logic |
 | `Templates/` | matching references (1600×900) |
 
+Each bot runs as a separate worker process ([`worker_run.py`](worker_run.py), launched via
+`run_from_source.py --worker`) so instances don't share global state.
 Paths — [`paths.py`](paths.py). Version — [`version.py`](version.py).
 
 ## Support
