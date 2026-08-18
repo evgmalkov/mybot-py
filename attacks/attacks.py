@@ -140,6 +140,13 @@ def _load_deploy_cfg():
     except Exception:
         d = {}
     return {
+        "mode":         str(d.get("deploy_mode", "chaotic")).strip().lower(),
+        "tap_delay":    tuple(d.get("deploy_tap_delay_sec", [0.03, 0.12])),
+        "hero_tab_delay": tuple(d.get("deploy_hero_tab_delay_sec", [0.1, 0.25])),
+        "hero_gap":     tuple(d.get("deploy_hero_gap_sec", [0.12, 0.35])),
+        "drag_tick_ms": tuple(d.get("deploy_drag_tick_ms", [70, 130])),
+        "strokes":      tuple(d.get("deploy_strokes", [2, 4])),
+        "stroke_pause": tuple(d.get("deploy_stroke_pause_sec", [0.15, 0.5])),
         "drop_delay":   tuple(d.get("deploy_drop_delay_sec", [0.02, 0.10])),
         "jitter_left":  tuple(d.get("deploy_jitter_left",  [0, 39, -27, 0])),
         "jitter_right": tuple(d.get("deploy_jitter_right", [-44, 0, -33, 0])),
@@ -405,6 +412,51 @@ def update_tabs():
 
 # ───────────────────── deploy helpers ─────────────────────
 
+def _deploy_chaotic(pts):
+    """Хаотичная высадка одиночными тапами: ПЕРЕМЕШАННЫЙ порядок точек + случайные паузы между
+    дропами (deploy_tap_delay_sec). Не мгновенный залп и не однообразный ритм; надёжно высаживает
+    (тап = деплой, в отличие от свайпа). Точки уже с jitter (разброс в рамках области высадки)."""
+    if not pts:
+        return
+    order = pts[:]
+    random.shuffle(order)                                  # хаотичный порядок в рамках области
+    lo, hi = DEPLOY_CFG["tap_delay"]
+    for k, (x, y) in enumerate(order):
+        if k % 4 == 0:
+            _ensure_active()                               # бой ещё идёт? (не на каждый тап)
+        run_adb(["shell", "input", "tap", str(int(x)), str(int(y))])
+        human_delay(lo, hi)                                # случайная пауза между дропами
+
+
+def _deploy_drag(pts):
+    """Высадка ПРОТЯЖКОЙ: выбранный войск раскидывается вдоль линии свайпа — игра сама
+    высаживает по своему тику («нажали и ведём пальцем»). Хаос: линия дробится на несколько
+    штрихов ('пальцев') с разной длиной/длительностью и нерегулярными паузами. Точки уже с jitter."""
+    if not pts:
+        return
+    n = len(pts)
+    lo_s, hi_s = DEPLOY_CFG["strokes"]
+    strokes = max(1, random.randint(int(lo_s), int(hi_s)))
+    base = max(1, n // strokes)
+    tlo, thi = DEPLOY_CFG["drag_tick_ms"]
+    plo, phi = DEPLOY_CFG["stroke_pause"]
+    i = 0
+    while i < n:
+        _ensure_active()                                   # бой ещё идёт?
+        step = max(1, base + random.randint(-1, 1))        # разная длина штриха
+        seg = pts[i:i + step]
+        if not seg:
+            break
+        x1, y1 = seg[0]
+        x2, y2 = seg[-1]
+        dur = max(120, len(seg) * random.randint(int(tlo), int(thi)))  # длительность ∝ числу дропов
+        # свайп с зажатием: игра высаживает выбранный войск вдоль пути по своему тику
+        run_adb(["shell", "input", "swipe", str(int(x1)), str(int(y1)),
+                 str(int(x2)), str(int(y2)), str(int(dur))])
+        human_delay(plo, phi)                              # нерегулярная пауза между штрихами
+        i += len(seg)
+
+
 def deploy_troops(troop_key):
     tab = TABS.get(troop_key)
     if not tab:
@@ -419,13 +471,21 @@ def deploy_troops(troop_key):
     _last_selected = tuple(tab)                     # запомнить выбор (вернём после активации героя)
     human_delay(0.25, 0.5)                          # человек не переключает таб мгновенно
 
-    # Высадка БАТЧАМИ: чанк тапов одним adb-вызовом (быстро), между чанками —
-    # проверка боя + короткая пауза (нерегулярный ритм). Точка высадки — с jitter.
+    # Точки высадки с jitter. Режим — из config/antiban.json (deploy_mode):
+    #  • 'chaotic' — одиночные тапы, перемешанный порядок + паузы (DEFAULT, человекоподобно, надёжно);
+    #  • 'chunk'   — быстрые батч-тапы (старое поведение);
+    #  • 'drag'    — протяжка свайпом (экспериментально; на многих сборках CoC НЕ высаживает).
     pts = [jitterCoord(x, y) for x, y in coords]
-    for i in range(0, len(pts), DEPLOY_CHUNK):
-        _ensure_active()                           # бой ещё идёт?
-        run_adb_taps(pts[i:i + DEPLOY_CHUNK])
-        human_delay(*DEPLOY_CFG["drop_delay"])     # пауза между чанками
+    mode = DEPLOY_CFG.get("mode", "chaotic")
+    if mode == "chunk":
+        for i in range(0, len(pts), DEPLOY_CHUNK):
+            _ensure_active()                       # бой ещё идёт?
+            run_adb_taps(pts[i:i + DEPLOY_CHUNK])
+            human_delay(*DEPLOY_CFG["drop_delay"])  # пауза между чанками
+    elif mode == "drag":
+        _deploy_drag(pts)
+    else:
+        _deploy_chaotic(pts)
 
 def deploy_heroes():
     print("\n→ Deploying Heroes")
@@ -437,11 +497,11 @@ def deploy_heroes():
             print("[SKIP] tab for", hero["name"]); continue
         _ensure_active()                                   # бой прерван? — не тапаем
         run_adb(["shell","input","tap", *map(str, tab)])   # выбрать таб героя
-        human_delay(0.35, 0.9)                             # человек не переключается мгновенно
+        human_delay(*DEPLOY_CFG["hero_tab_delay"])         # короткая пауза на переключение таба
         jx, jy = jitterCoord(*hero["coord"])
         run_adb(["shell","input","tap", str(jx), str(jy)]) # высадить героя
         _deployed_at[hero["name"].lower()] = time.time()   # теперь его можно мониторить
-        human_delay(0.5, 1.2)                              # пауза перед следующим героем
+        human_delay(*DEPLOY_CFG["hero_gap"])               # короткая пауза перед следующим героем
 
 def deploy_spells(spell_key):
     tab = TABS.get(spell_key)
@@ -511,7 +571,7 @@ def _handle_connection_lost(shot_gray):
     ty = maxloc[1] + TRY_AGAIN_OFFSET[1]
     print(f"[CONN] Connection lost (score={maxv:.2f}) — tapping TRY AGAIN at ({tx},{ty})")
     run_adb(["shell", "input", "tap", str(tx), str(ty)])
-    time.sleep(3)
+    human_delay(2.1, 3.9)
     return True
 
 # ───────────────────── hero auto-ability (#4) ─────────────────────
@@ -647,7 +707,7 @@ def speed_up(timeout=200):
     while time.time() - t0 < timeout:
         shot = capture_array()
         if shot is None:
-            time.sleep(2); continue
+            human_delay(1.4, 2.6); continue
         gray = cv2.cvtColor(shot, cv2.COLOR_BGR2GRAY)
         if _handle_connection_lost(gray):
             continue                              # popup handled; keep waiting
@@ -662,7 +722,7 @@ def speed_up(timeout=200):
                 return
         except Exception:
             pass
-        time.sleep(0.6)                           # чаще опрашиваем — HP героев падает быстро
+        human_delay(0.42, 0.78)                           # чаще опрашиваем — HP героев падает быстро
     print("[speed] speed button did not appear within timeout")
 # ───────────────────── public API ─────────────────────
 

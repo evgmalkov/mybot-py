@@ -198,7 +198,10 @@ def ensure_bluestacks():
     lines = _read_conf(conf)
     pref = _detect_instance_prefix(lines)
     print(f'▶ Using instance prefix: {pref}')
-    core_desired = {pref + 'fb_width': '1600', pref + 'fb_height': '900', pref + 'dpi': '300', pref + 'graphics_renderer': 'dx', pref + 'graphics_engine': 'aga', pref + 'adb_port': '5556', pref + 'status.adb_port': '5556', 'bst.qt_renderer': 'Direct3D11', 'bst.enable_adb_access': '1', 'bst.enable_adb_remote_access': '1'}
+    import syscfg
+    _bw, _bh, _bd = syscfg.resolution()                # общая resolution (config/system.json)
+    _bp = str(syscfg.emu('bluestacks', 'adb_port', 5556))
+    core_desired = {pref + 'fb_width': str(_bw), pref + 'fb_height': str(_bh), pref + 'dpi': str(_bd), pref + 'graphics_renderer': 'dx', pref + 'graphics_engine': 'aga', pref + 'adb_port': _bp, pref + 'status.adb_port': _bp, 'bst.qt_renderer': 'Direct3D11', 'bst.enable_adb_access': '1', 'bst.enable_adb_remote_access': '1'}
     bonus_desired = {'bst.feature.programmatic_ads': '0', 'bst.enable_programmatic_ads': '0'}
     bonus_changed = False
     for key, val in bonus_desired.items():

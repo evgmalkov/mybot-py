@@ -53,7 +53,7 @@ def _recover_emulator(host):
         if _device_online(host):
             print('✅ Emulator back online.')
             return
-        time.sleep(5)
+        main.rsleep(5)
     print('[RECOVERY] emulator still offline after restart attempt.')
 
 
@@ -70,8 +70,10 @@ def boot_recovery():
             return                     # эмулятор не поднялся — рестарт игры бессмыслен
     print('🔁 Restarting Clash of Clans...')
     subprocess.run([ADB_BIN, '-s', host, 'shell', 'am', 'force-stop', 'com.supercell.clashofclans'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
-    subprocess.run([ADB_BIN, '-s', host, 'shell', 'monkey', '-p', 'com.supercell.clashofclans', '-c', 'android.intent.category.LAUNCHER', '1'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+    # Android 14/LDPlayer 14 без `monkey` → кросс-версийный запуск через am start.
+    from app_launch import launch_app
+    launch_app(host, 'com.supercell.clashofclans', check=False)
     print('⏳ Waiting 10 seconds for game to load...')
-    time.sleep(10)
+    main.rsleep(10)
     print('👆 Dismissing pop-ups…')
     subprocess.run([ADB_BIN, '-s', host, 'shell', 'input', 'tap', '146', '487'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)

@@ -1,5 +1,7 @@
 {
   "_comment": "Переключение аккаунтов (мультивилладж). Экран Switch ID — FLAG_SECURE (adb-скриншот чёрный), поэтому переключаемся ПРЯМЫМ тапом по фикс-позициям слотов в игре 1600×900. slots: слот N → [x, y]. При смене раскладки/числа аккаунтов подстроить. account_count — реальное число Supercell ID на устройстве (детект по скриншоту невозможен из-за FLAG_SECURE, задаёте вручную; 0 = взять из числа выбранных деревень). wait_list_sec — пауза на загрузку списка после тапа Switch; wait_switch_sec — пауза на загрузку выбранного аккаунта.",
+  "_mode_comment": "mode = как разводить аккаунты. 'id_switch' (модель A) — один эмулятор-инстанс, переключение Supercell ID тапами по slots (совместимо со старым поведением). 'per_instance' (модель B) — один аккаунт на СВОЙ инстанс эмулятора (разные виртуалки), ротация поднимает/коннектит инстанс из bindings.",
+  "mode": "id_switch",
   "account_count": 0,
   "slots": {
     "1": [1088, 212],
@@ -9,5 +11,10 @@
     "5": [1088, 858]
   },
   "wait_list_sec": 4,
-  "wait_switch_sec": 6
+  "wait_switch_sec": 6,
+  "_bindings_comment": "Модель B (per_instance): деревня(аккаунт) → эмулятор+инстанс. emulator: 'memu'|'ldplayer'. index: индекс инстанса (LDPlayer: 0,1,2…; MEmu: VM index из 'memuc listvms'). Список инстансов смотреть кнопкой LD Multi-Instance / memuc listvms.",
+  "bindings": {
+    "1": { "emulator": "memu", "index": 1 },
+    "2": { "emulator": "memu", "index": 0 }
+  }
 }

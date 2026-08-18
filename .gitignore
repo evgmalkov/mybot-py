@@ -48,3 +48,6 @@ logs/
 
 # Пользовательский конфиг бота — рантайм-состояние (пишется GUI). Шаблон: settings.example.json
 /settings.json
+
+# runtime-кэш детекта LDPlayer
+.ldplayer_cache.json

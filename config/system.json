@@ -1,0 +1,18 @@
+{
+  "_comment": "СИСТЕМНЫЙ конфиг: плееры (эмуляторы), ADB, таймауты, отладка. Игровые параметры — в отдельных config/*.json (antiban/farming/army/heroes/wall_prices/accounts). Значения снаружи, логика в коде; отсутствие файла/ключа = дефолты (= прежние захардкоженные).",
+  "resolution": { "width": 1600, "height": 900, "dpi": 300 },
+  "emulators": {
+    "memu":       { "adb_base_port": 21503, "adb_port_step": 10 },
+    "ldplayer":   { "adb_base_port": 5555, "adb_port_step": 2 },
+    "bluestacks": { "adb_port": 5556, "adb_server_port": 5137 }
+  },
+  "timeouts": {
+    "emu_launch_wait_sec": 12,
+    "adb_connect_wait_sec": 90,
+    "boot_completed_wait_sec": 120,
+    "instance_start_wait_sec": 45,
+    "home_verify_wait_sec": 25,
+    "ldconsole_timeout_sec": 4.0
+  },
+  "debug": { "verbose": false }
+}

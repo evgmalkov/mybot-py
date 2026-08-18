@@ -2,6 +2,9 @@ import os
 import sys
 from pathlib import Path
 from paths import BASE_DIR
+import syscfg                       # системный конфиг (config/system.json)
+
+_BS_PORT = int(syscfg.emu('bluestacks', 'adb_port', 5556))   # порт BlueStacks (общий системный)
 
 adb_subdir = BASE_DIR / 'adb'
 local_adb = adb_subdir / 'adb.exe'
@@ -37,7 +40,7 @@ class _AdbBin(os.PathLike):
             host = key = None
         # BlueStacks: по host :5556 ИЛИ по выбранному эмулятору (host может быть ещё не
         # выставлен на раннем вызове → иначе уйдём в bundled v41 и убьём сервер HD-Adb).
-        is_bluestacks = (host and str(host).endswith(':5556')) or key == 'bluestacks'
+        is_bluestacks = (host and str(host).endswith(f':{_BS_PORT}')) or key == 'bluestacks'
         if is_bluestacks:
             for p in _BLUESTACKS_ADB_CANDIDATES:
                 if os.path.isfile(p):

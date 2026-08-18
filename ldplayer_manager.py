@@ -27,7 +27,9 @@ from unicode import imread_unicode
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 
-WIDTH, HEIGHT, DPI = ('1600', '900', '300')
+import syscfg
+_W, _H, _D = syscfg.resolution()                       # системный конфиг (config/system.json)
+WIDTH, HEIGHT, DPI = (str(_W), str(_H), str(_D))
 LAUNCH_WAIT, ADB_WAIT = (5, 90)
 
 if getattr(sys, 'frozen', False):
@@ -84,8 +86,8 @@ def _from_path():
         if not os.path.isfile(p):
             continue
         base = os.path.dirname(p)
-        player = os.path.join(base, 'LDPlayer.exe')
-        if not os.path.isfile(player):
+        player = _find_player_exe(base)
+        if not player:
             continue
         return (p, player)
     return (None, None)
@@ -120,20 +122,20 @@ def _from_app_paths():
         except OSError:
             return ''
     for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-        for name in ('LDPlayer.exe', 'ldconsole.exe', 'dnconsole.exe'):
+        for name in ('LDPlayer.exe', 'dnplayer.exe', 'ldconsole.exe', 'dnconsole.exe'):
             exe = q(hive, f'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{name}')
             if not exe:
                 continue
             base = os.path.dirname(exe)
-            console = exe if os.path.basename(exe).lower() in ('ldconsole.exe', 'dnconsole.exe') else ''
-            player = os.path.join(base, 'LDPlayer.exe')
+            console = exe if os.path.basename(exe).lower() in CONSOLE_EXES else ''
+            player = _find_player_exe(base)
             if not console:
-                for c in ('ldconsole.exe', 'dnconsole.exe'):
+                for c in CONSOLE_EXES:
                     p = os.path.join(base, c)
                     if os.path.isfile(p):
                         console = p
                         break
-            if console and os.path.isfile(player):
+            if console and player:
                 return (console, player)
     return (None, None)
 
@@ -201,14 +203,10 @@ not just folder names. Stops at first good pair.
         root = f'{drive}:\\'
         for dirpath, filenames in _iter_depth_limited(root, max_depth=max_depth):
             fl = {f.lower() for f in filenames}
-            if 'ldplayer.exe' in fl:
+            if 'ldplayer.exe' in fl or 'dnplayer.exe' in fl:
                 if 'ldconsole.exe' in fl or 'dnconsole.exe' in fl:
-                    base = dirpath
-                    console = os.path.join(base, 'ldconsole.exe')
-                    if not os.path.isfile(console):
-                        console = os.path.join(base, 'dnconsole.exe')
-                    player = os.path.join(base, 'LDPlayer.exe')
-                    if os.path.isfile(console) and os.path.isfile(player):
+                    console, player = _has_console_player(dirpath)
+                    if console and player:
                         return (console, player)
     return (None, None)
 
@@ -264,17 +262,29 @@ def _iter_depth_limited(root: str, max_depth: int = 6):
         yield (dirpath, filenames)
 
 
+# Имя плеера отличается по версиям LDPlayer: v9 — LDPlayer.exe, v14 — dnplayer.exe.
+PLAYER_EXES = ('dnplayer.exe', 'LDPlayer.exe')
+CONSOLE_EXES = ('ldconsole.exe', 'dnconsole.exe')
+
+
+def _find_player_exe(base: str) -> Optional[str]:
+    """Путь к плееру LDPlayer в папке base (пробуем оба имени), либо None."""
+    for exe in PLAYER_EXES:
+        p = os.path.join(base, exe)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def _has_console_player(base: str) -> tuple[Optional[str], Optional[str]]:
     """Return (console, player) if both exist in base; else (None, None)."""
     console = None
-    for exe in ('ldconsole.exe', 'dnconsole.exe'):
+    for exe in CONSOLE_EXES:
         p = os.path.join(base, exe)
         if os.path.isfile(p):
             console = p
             break
-    player = os.path.join(base, 'LDPlayer.exe')
-    if not os.path.isfile(player):
-        player = None
+    player = _find_player_exe(base)
     return (console, player) if console and player else (None, None)
 
 
@@ -390,7 +400,8 @@ and restart adbd inside the guest via ldconsole to kick it awake.
     return False
 
 
-LD_ADB_BASE = 5555
+LD_ADB_BASE = int(syscfg.emu('ldplayer', 'adb_base_port', 5555))
+LD_ADB_STEP = int(syscfg.emu('ldplayer', 'adb_port_step', 2))
 
 
 def _find_ld_cfg_path(ldconsole: str, index: int) -> str | None:
@@ -708,21 +719,26 @@ Discovery order:
 
 
 def is_running() -> bool:
-    try:
-        out = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq LDPlayer.exe'], stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW, shell=True)
-        return b'LDPlayer.exe' in out
-    except subprocess.SubprocessError:
-        return False
+    # Процесс плеера: v9 — LDPlayer.exe, v14 — dnplayer.exe.
+    for proc in ('LDPlayer.exe', 'dnplayer.exe'):
+        try:
+            out = subprocess.check_output(['tasklist', '/FI', f'IMAGENAME eq {proc}'], stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW, shell=True)
+            if proc.encode() in out:
+                return True
+        except subprocess.SubprocessError:
+            continue
+    return False
 
 
 def stop_player(ldconsole: str):
     subprocess.run([ldconsole, 'quitall'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
     time.sleep(2)
-    subprocess.run(['taskkill', '/IM', 'LDPlayer.exe', '/F'], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+    for proc in ('LDPlayer.exe', 'dnplayer.exe'):   # v9 / v14
+        subprocess.run(['taskkill', '/IM', proc, '/F'], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
     time.sleep(2)
 
 
-LD_CONSOLE_TIMEOUT = 4.0
+LD_CONSOLE_TIMEOUT = float(syscfg.timeout('ldconsole_timeout_sec', 4.0))
 
 
 def _ldconsole(ldconsole: str, args: list[str]) -> str:
@@ -763,7 +779,7 @@ def _ensure_adb_tcp(ldconsole: str, index: int, port: int = 5555) -> tuple[str, 
 
 
 def _get_adb_port(_ldconsole: str, index: int) -> int:
-    return LD_ADB_BASE + 2 * max(0, int(index))
+    return LD_ADB_BASE + LD_ADB_STEP * max(0, int(index))
 
 
 def _connect_only(ldconsole: str, index: int) -> bool:
@@ -881,13 +897,10 @@ def ensure_ldplayer(index: int = 0):
             bad_res = w is None or h is None or str(w) != WIDTH or str(h) != HEIGHT
             bad_dpi = d is None or str(d) != DPI
             if cfg_path:
-                flags_changed = _patch_ld_cfg_basic_flags(cfg_path)
-            else:
-                flags_changed = False
-            need_fix = bad_res or bad_dpi or flags_changed
-            if flags_changed:
-                print('▶ Applied Root/ADB flags in config; restart required to take effect.')
-            need_fix = bad_res or bad_dpi or root_changed
+                _patch_ld_cfg_basic_flags(cfg_path)          # записать флаги для будущего cold-boot
+            # ADB уже подключился → root/adb-флаги фактически работают. НЕ рестартим ради них
+            # (иначе гасим рабочий LDPlayer на каждом старте). Рестарт — только под res/DPI.
+            need_fix = bad_res or bad_dpi
             if bad_res or bad_dpi:
                 print(f'▶ Core mismatches detected (have: {w}x{h}@{d}, want: {WIDTH}x{HEIGHT}@{DPI})')
         else:
@@ -912,11 +925,13 @@ def ensure_ldplayer(index: int = 0):
     if not _connect_only(ldconsole, index):
         print('❌ ADB failed to connect.')
         sys.exit(1)
-    if not _wait_for_boot_adb(host, timeout=120):
+    if not _wait_for_boot_adb(host, timeout=int(syscfg.timeout('boot_completed_wait_sec', 120))):
         print("⚠️ Android didn't report boot_completed in time; continuing anyway...")
-    if not wait_for_home_icon():
-        print('❌ Home screen not detected – attempting boot recovery…')
-        boot_recovery()
+    # Эмулятор загружен (boot_completed по ADB). Запуск CoC и подтверждение home-базы делает
+    # setup_emulator/main. НЕ вызываем wait_for_home_icon: он жал Android-HOME (KEYCODE_HOME)
+    # каждую секунду, сворачивая CoC в фон (шаблон store_home_page_LD не совпадает с Android 14) —
+    # из-за чего игра «сворачивалась в трей» и ре-сворачивалась при ручном открытии.
+    print('✅ LDPlayer ready (ADB up, boot completed). Launching game handled by setup_emulator.')
 
 
 def list_ld_instances(debug: bool = False):
@@ -1013,24 +1028,16 @@ Supports:
 
 def is_instance_started(ldconsole: str, index: int) -> bool:
     try:
-        from Ldplayer_Manager import list_ld_instances
+        items = list_ld_instances()
     except Exception:
-        try:
-            items = list_ld_instances()
-        except Exception:
-            return False
-    else:
-        try:
-            items = list_ld_instances()
-        except Exception:
-            return False
+        return False
     for r in items:
         if r.get('index') == index:
             return bool(r.get('started'))
     return False
 
 
-def _wait_started(ldconsole: str, index: int, timeout: int = 45) -> bool:
+def _wait_started(ldconsole: str, index: int, timeout: int = int(syscfg.timeout('instance_start_wait_sec', 45))) -> bool:
     """
 Wait until the LDPlayer.exe process is up.
 Ignore ldconsole's 'started' flag completely.

@@ -54,6 +54,7 @@ from village_wiz import run_village_wizard
 from qt_thread_compat import QtThreadCompat
 from stats_tab import StatsTab
 from ldplayer_manager import list_ld_instances
+from memu_manager import list_memu_instances
 from paths import BASE_DIR
 APP_DIR = BASE_DIR
 ATTACK_DIR = os.path.join(APP_DIR, 'attacks')
@@ -108,19 +109,34 @@ class EmulatorSelectionDialog(QDialog):
         bs_logo = os.path.join(TEMPLATES_DIR, 'bluestacks_logo.png')
         ld_logo = os.path.join(TEMPLATES_DIR, 'ldplayer_logo.png')
         btn_memu = make_button('MEmu', memu_logo)
+        btn_memu_mi = make_button('MEmu\nMulti-Instance', memu_logo)
         btn_bs = make_button('BlueStacks', bs_logo)
         btn_ld = make_button('LDPlayer', ld_logo)
         btn_ldmi = make_button('LD\nMulti-Instance', ld_logo)
         btn_memu.clicked.connect(lambda: self._choose('memu'))
+        btn_memu_mi.clicked.connect(lambda: self._choose('memu_multi'))
         btn_bs.clicked.connect(lambda: self._choose('bluestacks'))
         btn_ld.clicked.connect(lambda: self._choose('ldplayer'))
         btn_ldmi.clicked.connect(lambda: self._choose('ldplayer_multi'))
-        # Стабильно работает только MEmu — остальные эмуляторы в разработке, блокируем выбор.
-        for _btn in (btn_bs, btn_ld, btn_ldmi):
+        # BlueStacks — в разработке. LDPlayer-кнопки активны только если LDPlayer установлен
+        # (быстрый детект без скана диска — иначе всплывал долгий «Scanning LDPlayer»).
+        ld_installed = False
+        try:
+            from ldplayer_manager import find_ldplayer_tools
+            _ldc, _ldp = find_ldplayer_tools(allow_deep_scan=False)
+            ld_installed = bool(_ldc and _ldp)
+        except Exception:
+            ld_installed = False
+        _disabled = {btn_bs: 'In development — use MEmu or LDPlayer'}
+        if not ld_installed:
+            _disabled[btn_ld] = 'LDPlayer is not installed'
+            _disabled[btn_ldmi] = 'LDPlayer is not installed'
+        for _btn, _tip in _disabled.items():
             _btn.setEnabled(False)
             _btn.setCursor(Qt.ArrowCursor)
-            _btn.setToolTip('В разработке — стабильно работает только MEmu')
+            _btn.setToolTip(_tip)
         hbox.addWidget(btn_memu)
+        hbox.addWidget(btn_memu_mi)
         hbox.addWidget(btn_bs)
         hbox.addWidget(btn_ld)
         hbox.addWidget(btn_ldmi)
@@ -325,6 +341,7 @@ def save_settings(cfg: dict):
 
 
 FARMING_PATH = os.path.join(BASE_DIR, 'config', 'farming.json')
+ACCOUNTS_PATH = os.path.join(BASE_DIR, 'config', 'accounts.json')
 
 
 def load_farming_flags():
@@ -415,10 +432,16 @@ class WoodBackground(QWidget):
 
 
 
-class LDInstancePickerDialog(QDialog):
-    def __init__(self, parent=None):
+class InstancePickerDialog(QDialog):
+    def __init__(self, parent=None, list_fn=None, title='Select LDPlayer Instance',
+                 header='Choose an LDPlayer instance', logo_name='ldplayer_logo.png',
+                 name_prefix='LDPlayer', allow_running=True):
         super().__init__(parent)
-        self.setWindowTitle('Select LDPlayer Instance')
+        self._list_fn = list_fn or list_ld_instances
+        self._logo_name = logo_name
+        self._name_prefix = name_prefix
+        self._allow_running = allow_running   # можно ли выбрать уже запущенный инстанс (attach)
+        self.setWindowTitle(title)
         self.setModal(True)
         self.setFixedSize(520, 380)
         self.setStyleSheet('background:#1f1f1f;')
@@ -427,7 +450,7 @@ class LDInstancePickerDialog(QDialog):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(8)
-        hdr = QLabel('Choose an LDPlayer instance')
+        hdr = QLabel(header)
         hdr.setAlignment(Qt.AlignCenter)
         hdr.setStyleSheet('color:#eaeaea; font-weight:600; font-size:15px;')
         self.layout.addWidget(hdr)
@@ -482,15 +505,15 @@ class LDInstancePickerDialog(QDialog):
         btn.released.connect(on_release)
     def _populate_table(self):
         self.table.setRowCount(0)
-        rows = list_ld_instances()
+        rows = self._list_fn()
         if not rows:
             self.table.setRowCount(1)
-            it = QTableWidgetItem('No LDPlayer instances found.')
+            it = QTableWidgetItem(f'No {self._name_prefix} instances found.')
             it.setFlags(it.flags() & ~Qt.ItemIsEnabled & ~Qt.ItemIsSelectable)
             self.table.setItem(0, 0, it)
             self.table.setSpan(0, 0, 1, 3)
             return
-        logo_path = os.path.join(TEMPLATES_DIR, 'ldplayer_logo.png')
+        logo_path = os.path.join(TEMPLATES_DIR, self._logo_name)
         icon = QIcon(logo_path) if os.path.exists(logo_path) else QIcon()
         for r in rows:
             self._add_row(r['index'], r['name'], bool(r['started']), icon)
@@ -498,7 +521,7 @@ class LDInstancePickerDialog(QDialog):
     def _add_row(self, idx: int, name: str, started: bool, icon: QIcon):
         row = self.table.rowCount()
         self.table.insertRow(row)
-        name_item = QTableWidgetItem(icon, name or f'LDPlayer-{idx}')
+        name_item = QTableWidgetItem(icon, name or f'{self._name_prefix}-{idx}')
         name_item.setData(Qt.UserRole, idx)
         name_item.setData(Qt.UserRole + 1, name)
         name_item.setData(Qt.UserRole + 2, started)
@@ -516,7 +539,7 @@ class LDInstancePickerDialog(QDialog):
         btn.setIconSize(QSize(120, 40))
         btn.setStyleSheet('QPushButton{border:none;background:transparent;}')
         btn.setProperty('ld_index', idx)
-        btn.setProperty('ld_name', name or f'LDPlayer-{idx}')
+        btn.setProperty('ld_name', name or f'{self._name_prefix}-{idx}')
         btn.setProperty('ld_started', started)
         btn.clicked.connect(self._on_start_clicked)
         cell = QWidget()
@@ -548,7 +571,7 @@ class LDInstancePickerDialog(QDialog):
         idx = btn.property('ld_index')
         name = btn.property('ld_name')
         started = bool(btn.property('ld_started'))
-        if started:
+        if started and not self._allow_running:
             self._warn_busy()
         else:
             self.index = int(idx)
@@ -559,11 +582,11 @@ class LDInstancePickerDialog(QDialog):
         if not item:
             return
         started = bool(item.data(Qt.UserRole + 2))
-        if started:
+        if started and not self._allow_running:
             self._warn_busy()
             return
         self.index = int(item.data(Qt.UserRole))
-        self.name = str(item.data(Qt.UserRole + 1) or f'LDPlayer-{self.index}')
+        self.name = str(item.data(Qt.UserRole + 1) or f'{self._name_prefix}-{self.index}')
         self.accept()
     def _equalize_columns(self):
         total = max(0, self.table.viewport().width())
@@ -574,6 +597,10 @@ class LDInstancePickerDialog(QDialog):
         super().resizeEvent(e)
         QTimer.singleShot(0, self._adjust_button_icons)
         QTimer.singleShot(0, self._equalize_columns)
+
+
+# Обратная совместимость: старое имя = обобщённый пикер (по умолчанию LDPlayer).
+LDInstancePickerDialog = InstancePickerDialog
 
 
 
@@ -713,6 +740,52 @@ class MainWindow(QMainWindow):
                 eff = QGraphicsOpacityEffect(icon)
                 eff.setOpacity(1.0 if active else 0.35)
                 icon.setGraphicsEffect(eff)
+    def _load_bindings_ui(self):
+        """Заполнить режим и пер-деревенные привязки из config/accounts.json."""
+        try:
+            with open(ACCOUNTS_PATH, encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        mode = str(data.get('mode', 'id_switch')).lower()
+        self.mv_mode_combo.setCurrentIndex(1 if mode == 'per_instance' else 0)
+        binds = data.get('bindings', {}) or {}
+        for i, (emu_combo, idx_spin) in self.mv_bindings.items():
+            rec = binds.get(str(i)) or {}
+            j = emu_combo.findData(str(rec.get('emulator', 'ldplayer')).lower())
+            emu_combo.setCurrentIndex(j if j >= 0 else emu_combo.findData('ldplayer'))
+            try:
+                idx_spin.setValue(int(rec.get('index', 0)))
+            except (TypeError, ValueError):
+                idx_spin.setValue(0)
+        self._on_mode_changed()
+
+    def _on_mode_changed(self):
+        """Активировать поля привязки только в режиме per_instance."""
+        per = self.mv_mode_combo.currentData() == 'per_instance'
+        for emu_combo, idx_spin in getattr(self, 'mv_bindings', {}).values():
+            emu_combo.setEnabled(per)
+            idx_spin.setEnabled(per)
+
+    def _save_bindings(self):
+        """Записать режим + привязки аккаунт↔инстанс в config/accounts.json (остальное сохранить)."""
+        try:
+            with open(ACCOUNTS_PATH, encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        data['mode'] = self.mv_mode_combo.currentData() or 'id_switch'
+        binds = data.get('bindings', {}) or {}
+        for i, (emu_combo, idx_spin) in self.mv_bindings.items():
+            binds[str(i)] = {'emulator': emu_combo.currentData(), 'index': int(idx_spin.value())}
+        data['bindings'] = binds
+        try:
+            with open(ACCOUNTS_PATH, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, 'Multi-Account', 'Bindings saved to config/accounts.json')
+        except Exception as e:
+            QMessageBox.warning(self, 'Multi-Account', f'Failed to save: {e}')
+
     def _save_village_config(self, idx: int):
         """\nRead all current UI fields and write them out to Village_{idx}.json,\nbut only if that village was just loaded.\n"""
         path = os.path.join(APP_DIR, 'profiles', f'Village_{idx}.json')
@@ -827,12 +900,26 @@ class MainWindow(QMainWindow):
         dlg = EmulatorSelectionDialog(self)
         if dlg.exec_() == QDialog.Accepted:
             choice = dlg.getSelection()
+            main.memu_index = None          # сбрасываем: только memu_multi задаёт явный индекс
             if choice == 'memu':
                 self.host = MEMU
                 main.emulator_key = 'memu'
                 main.ld_index = 0
                 main.ld_name = None
                 port = 6200
+            elif choice == 'memu_multi':
+                pick = InstancePickerDialog(self, list_fn=list_memu_instances,
+                                            title='Select MEmu Instance',
+                                            header='Choose a MEmu instance',
+                                            logo_name='memu_logo.png', name_prefix='MEmu')
+                if pick.exec_() != QDialog.Accepted:
+                    return None
+                main.emulator_key = 'memu'
+                main.ld_index = pick.index
+                main.ld_name = pick.name
+                main.memu_index = pick.index    # пер-инстансный путь: ensure_memu(index)
+                self.host = None
+                port = 6300 + pick.index
             else:
                 if choice == 'bluestacks':
                     self.host = BLUESTACKS
@@ -1301,6 +1388,20 @@ class MainWindow(QMainWindow):
         self.mv_interval.setValue(int(self.settings.get('multi_interval_mins', 30)))
         h2.addWidget(self.mv_interval)
         mv_layout.addLayout(h2)
+        # --- Мультиаккаунт: модель разведения аккаунтов ---
+        h_mode = QHBoxLayout()
+        lbl_mode = QLabel('Account mode:')
+        lbl_mode.setFont(QFont('Segoe UI', 12, QFont.Bold))
+        lbl_mode.setStyleSheet('color: #FFFFFF;')
+        h_mode.addWidget(lbl_mode)
+        self.mv_mode_combo = QComboBox()
+        self.mv_mode_combo.addItem('ID switch (single instance)', 'id_switch')
+        self.mv_mode_combo.addItem('Per-instance (account = instance)', 'per_instance')
+        self.mv_mode_combo.setFont(QFont('Segoe UI', 11))
+        self.mv_mode_combo.currentIndexChanged.connect(lambda _=0: self._on_mode_changed())
+        h_mode.addWidget(self.mv_mode_combo)
+        h_mode.addStretch()
+        mv_layout.addLayout(h_mode)
         self.delete_btn = AnimatedButton('Delete All')
         self.delete_btn.setFont(QFont('Segoe UI', 9, QFont.Bold))
         self.delete_btn.setFixedSize(95, 28)
@@ -1314,6 +1415,7 @@ class MainWindow(QMainWindow):
         group.setFont(QFont('Segoe UI', 14, QFont.Bold))
         group.setStyleSheet('\n            QGroupBox {\n                color: #FFFFFF;\n                border: 1px solid #EFE2BA;\n                margin-top: 6px;\n            }\n            QGroupBox::title {\n                subcontrol-origin: margin;\n                left: 8px; padding: 0 4px;\n            }\n        ')
         self.mv_village_widgets = []
+        self.mv_bindings = {}          # деревня i → (emulator QComboBox, instance QSpinBox)
         colors = ['#eaecee', '#eaecee', '#eaecee', '#eaecee', '#eaecee']
         self.mv_colors = colors
         for i in range(1, 6):
@@ -1337,6 +1439,24 @@ class MainWindow(QMainWindow):
             save_btn.setFont(QFont('Segoe UI', 8, QFont.Bold))
             save_btn.setStyleSheet('\n                QPushButton {\n                    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,\n                        stop:0 #2196F3, stop:1 #1976D2);\n                    color: #FFF; border:none; border-radius:8px;\n                    padding:4px 16px;\n                }\n                QPushButton:hover {\n                    background: #42A5F5;\n                }\n            ')
             row.addWidget(save_btn)
+            # привязка к инстансу (модель B): эмулятор + индекс инстанса
+            arrow = QLabel('→')
+            arrow.setFont(QFont('Segoe UI', 10, QFont.Bold))
+            arrow.setStyleSheet('color: #EFE2BA;')
+            row.addWidget(arrow)
+            emu_combo = QComboBox()
+            emu_combo.addItem('MEmu', 'memu')
+            emu_combo.addItem('LDPlayer', 'ldplayer')
+            emu_combo.setFont(QFont('Segoe UI', 8, QFont.Bold))
+            emu_combo.setFixedWidth(110)
+            row.addWidget(emu_combo)
+            idx_spin = QSpinBox()
+            idx_spin.setRange(0, 31)
+            idx_spin.setPrefix('#')
+            idx_spin.setFont(QFont('Segoe UI', 8, QFont.Bold))
+            idx_spin.setFixedWidth(64)
+            row.addWidget(idx_spin)
+            self.mv_bindings[i] = (emu_combo, idx_spin)
             row.addStretch()
             vbox.addLayout(row, 1)
             self.mv_village_widgets.append((cb, icon, apply_btn, save_btn))
@@ -1347,6 +1467,12 @@ class MainWindow(QMainWindow):
             save_btn.clicked.connect(lambda _, village_idx=i: self._save_village_config(village_idx))
         group.setLayout(vbox)
         mv_layout.addWidget(group, 1)
+        save_bind_btn = AnimatedButton('Save bindings')
+        save_bind_btn.setFont(QFont('Segoe UI', 9, QFont.Bold))
+        save_bind_btn.setToolTip('Save account mode and account↔instance bindings to config/accounts.json')
+        save_bind_btn.clicked.connect(self._save_bindings)
+        mv_layout.addWidget(save_bind_btn, alignment=Qt.AlignRight)
+        self._load_bindings_ui()
         bridge.setActiveVillage.connect(self.highlight_active_village)
         for cb, icon, apply_btn, save_btn in self.mv_village_widgets:
             cb.setEnabled(False)
@@ -1587,7 +1713,7 @@ class MainWindow(QMainWindow):
                 owns_lock = hasattr(self, '_emu_socket') and self._emu_socket.fileno() != -1
                 if not owns_lock:
                     port_map = {MEMU: 6200, BLUESTACKS: 6201, LDPLAYER: 6202}
-                    if getattr(main, 'emulator_key', '') == 'ldplayer_multi':
+                    if getattr(main, 'emulator_key', '') == 'ldplayer':
                         port = 6202 + int(getattr(main, 'ld_index', 0))
                     else:
                         port = port_map.get(self.host, 6299)

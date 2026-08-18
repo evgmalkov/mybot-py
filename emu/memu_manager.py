@@ -14,13 +14,15 @@ from boot_recovery import boot_recovery
 from unicode import imread_unicode
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-WIDTH = '1600'
-HEIGHT = '900'
-DPI = '300'
-ADB_ADDRESS = '127.0.0.1:21503'
-LAUNCH_WAIT = 12
-ADB_WAIT = 90
-MEMU = '127.0.0.1:21503'
+import syscfg
+_W, _H, _D = syscfg.resolution()                       # системный конфиг (config/system.json)
+WIDTH, HEIGHT, DPI = (str(_W), str(_H), str(_D))
+MEMU_ADB_BASE = int(syscfg.emu('memu', 'adb_base_port', 21503))
+MEMU_ADB_STEP = int(syscfg.emu('memu', 'adb_port_step', 10))
+ADB_ADDRESS = f'127.0.0.1:{MEMU_ADB_BASE}'
+LAUNCH_WAIT = int(syscfg.timeout('emu_launch_wait_sec', 12))
+ADB_WAIT = int(syscfg.timeout('adb_connect_wait_sec', 90))
+MEMU = ADB_ADDRESS
 from paths import BASE_DIR as DIR
 TEMPLATE_DIR = os.path.join(DIR, 'Templates')
 
@@ -61,6 +63,45 @@ def get_instance_index(memuc_path):
         if parts[0].isdigit():
             return parts[0]
     return '0'
+
+
+# --- Мульти-инстанс (модель B: один аккаунт = один MEmu-инстанс) ---
+# ADB-порт MEmu по индексу VM: инстанс 0 → base, далее +step на инстанс (config/system.json).
+# ВНИМАНИЕ: формула зависит от версии MEmu — проверить вживую (memuc listvms + adb devices).
+# MEMU_ADB_BASE / MEMU_ADB_STEP определены сверху из syscfg.
+
+
+def memu_host(index) -> str:
+    """ADB-адрес MEmu-инстанса по индексу VM."""
+    return f'127.0.0.1:{MEMU_ADB_BASE + int(index) * MEMU_ADB_STEP}'
+
+
+def list_memu_instances():
+    """Список MEmu-инстансов: [{index, name, started}] из 'memuc listvms'.
+
+    Формат строки memuc: <index>,<title>,<top_handle>,<is_running>,<pid>,<disk>. Возвращаем
+    индекс/имя/флаг запуска — для GUI-пикера и привязки аккаунт↔инстанс.
+    """
+    _, memuc, _ = find_memu_tools()
+    if not memuc:
+        return []
+    out = run([memuc, 'listvms'])
+    items = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # memuc отдаёт CSV; иногда пробелы — берём оба варианта
+        parts = line.split(',') if ',' in line else line.split()
+        if not parts or not parts[0].strip().isdigit():
+            continue
+        idx = int(parts[0].strip())
+        name = parts[1].strip() if len(parts) > 1 else f'MEmu_{idx}'
+        started = False
+        if len(parts) > 3:
+            started = parts[3].strip() in ('1', 'running', 'started', 'true')
+        items.append({'index': idx, 'name': name, 'started': started})
+    return sorted({(i['index']): i for i in items}.values(), key=lambda r: r['index'])
 
 
 def apply_resolution(memuc_path, index):
@@ -170,7 +211,7 @@ def capture_for_matching():
     return take_screenshot(output_path='home_page.png')
 
 
-def wait_for_settings_icon(template='settings_logo.png', thresh=0.8, timeout=25):
+def wait_for_settings_icon(template='settings_logo.png', thresh=0.8, timeout=int(syscfg.timeout('home_verify_wait_sec', 25))):
     host = main.host
     tpl_path = os.path.join(TEMPLATE_DIR, template)
     tpl = imread_unicode(tpl_path, cv2.IMREAD_GRAYSCALE)
@@ -204,7 +245,72 @@ def wait_for_settings_icon(template='settings_logo.png', thresh=0.8, timeout=25)
     return False
 
 
-def ensure_memu():
+def _connect_host(host):
+    """ADB-коннект к конкретному хосту с ретраями (для пер-инстансного пути)."""
+    subprocess.run([ADB_BIN, 'disconnect', host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+    start = time.time()
+    while time.time() - start < ADB_WAIT:
+        out = run([ADB_BIN, 'connect', host])
+        if 'connected' in out.lower():
+            for d in run([ADB_BIN, 'devices']).splitlines()[1:]:
+                if host in d and 'device' in d:
+                    print('✅ Emulator connected and online.')
+                    return True
+        time.sleep(3)
+    print('❌ ADB failed to connect.')
+    return False
+
+
+def _memu_instance_started(memuc, index) -> bool:
+    return any(i['index'] == int(index) and i['started'] for i in list_memu_instances())
+
+
+def ensure_memu(index=None):
+    """Поднять/настроить MEmu. index=None — прежний одно-инстансный путь; index задан —
+    пер-инстансный (модель B: аккаунт=инстанс), хост = memu_host(index)."""
+    if index is None:
+        return _ensure_memu_default()
+    return _ensure_memu_instance(int(index))
+
+
+def _ensure_memu_instance(index):
+    memu_exe, memuc_exe, _ = find_memu_tools()
+    if not memu_exe or not memuc_exe:
+        print('❌ Could not find a MEmu installation under Program Files.')
+        sys.exit(1)
+    vm_idx = str(index)
+    host = memu_host(index)
+    main.host = host
+    print(f'▶ MEmu multi-instance: VM #{vm_idx} → {host}')
+    cur = run([memuc_exe, 'getconfigex', '-i', vm_idx, 'custom_resolution'])
+    parts = cur.strip().split()
+    res_ok = len(parts) >= 3 and tuple(parts[-3:]) == (WIDTH, HEIGHT, DPI)
+    out = run([memuc_exe, 'getconfigex', '-i', vm_idx, 'graphics_render_mode'])
+    mode = next((int(t) for t in out.strip().split() if t in ('0', '1', '2')), None)
+    rend_ok = mode == 1
+    changed = False
+    if not res_ok:
+        apply_resolution(memuc_exe, vm_idx)
+        changed = True
+    if not rend_ok:
+        subprocess.run([memuc_exe, 'setconfigex', '-i', vm_idx, 'graphics_render_mode', '1'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+        changed = True
+    if changed and _memu_instance_started(memuc_exe, index):
+        print('↻ Config changed → restarting instance…')
+        subprocess.run([memuc_exe, 'stop', '-i', vm_idx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+        time.sleep(2)
+    if not _memu_instance_started(memuc_exe, index):
+        print(f'🔄 Starting MEmu VM #{vm_idx}…')
+        subprocess.run([memuc_exe, 'start', '-i', vm_idx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+        time.sleep(LAUNCH_WAIT)
+    if not _connect_host(host):
+        sys.exit(1)
+    if not wait_for_settings_icon():
+        print('❌ Failed to verify home page.')
+        boot_recovery()
+
+
+def _ensure_memu_default():
     memu_exe, memuc_exe, _ = find_memu_tools()
     if not memu_exe or not memuc_exe:
         print('❌ Could not find a MEmu installation under Program Files.')

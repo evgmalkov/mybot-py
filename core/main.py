@@ -57,12 +57,14 @@ def _load_antiban():
         'between_cycles_sec': tuple(d.get('between_cycles_sec', [8, 25])),
         'break_chance': float(d.get('break_chance', 0.05)),
         'break_sec': tuple(d.get('break_sec', [60, 240])),
+        'transition_delay_sec': tuple(d.get('transition_delay_sec', [2, 6])),
     }
 
 
 ANTIBAN = _load_antiban()
 # ADB_BIN — динамический выбор adb по host (BlueStacks → HD-Adb.exe), см. adb_config.
 from adb_config import ADB_BIN
+import syscfg                       # системный конфиг (config/system.json)
 os.chdir(BASE_DIR)
 ADB_DIR = BASE_DIR
 ATTACKS_DIR = os.path.join(ADB_DIR, 'attacks')
@@ -144,8 +146,8 @@ MAX_WAIT_BATTLE = 170
 _cycle_count = 0
 _saved_wall_offset = None
 wall_save = False
-MEMU = '127.0.0.1:21503'
-BLUESTACKS = '127.0.0.1:5556'
+MEMU = f"127.0.0.1:{syscfg.emu('memu', 'adb_base_port', 21503)}"
+BLUESTACKS = f"127.0.0.1:{syscfg.emu('bluestacks', 'adb_port', 5556)}"
 LDPLAYER = '127.0.0.1:5555'
 def run_adb(cmd_args):
     """Run ADB with the given argument list silently."""
@@ -153,13 +155,13 @@ def run_adb(cmd_args):
 def return_home():
     """Equivalent to return_home.bat → tap 788 768."""
     run_adb(['shell', 'input', 'tap', '788', '768'])
-    time.sleep(3)
+    rsleep(3)
 def search_attack():
     """Equivalent to search_attack.bat."""
     run_adb(['shell', 'input', 'tap', '113', '797'])
-    time.sleep(0.7)
+    rsleep(0.7)
     run_adb(['shell', 'input', 'tap', '272', '659'])
-    time.sleep(0.7)
+    rsleep(0.7)
     run_adb(['shell', 'input', 'tap', '1445', '804'])
 def search_next():
     """Equivalent to search_next.bat → tap 1432 637."""
@@ -556,7 +558,7 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
         run_adb(['shell', 'input', 'swipe', '725', '574', '709', '193', '1000'])
         pause_event.wait()
         shot_path = take_screenshot('clan_capital.png')
-        time.sleep(0.5)
+        rsleep(0.5)
         pause_event.wait()
         img = imread_unicode(shot_path, cv2.IMREAD_GRAYSCALE)
         if img is None or img.size == 0:
@@ -596,11 +598,11 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
                             th_h, th_w = tpl.shape[:2]
                             cx = x1 + loc[0] + th_w // 2
                             cy = y1 + loc[1] + th_h // 2
-                            time.sleep(0.5)
+                            rsleep(0.5)
                             pause_event.wait()
                             tap(cx, cy)
                             print(f'[CLAN CAPITAL] ✅ tapped (cached) {cached} at ({cx}, {cy})')
-                            time.sleep(0.5)
+                            rsleep(0.5)
                             pause_event.wait()
                             if not clan_capital_phase2():
                                 return False
@@ -625,7 +627,7 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
                                                 boot_recovery()
                                                 ensure_home_base()
                                                 tap(140, 606)
-                                                time.sleep(0.6)
+                                                rsleep(0.6)
                                                 return clan_capital(cfg, threshold=threshold, _restart_depth=_restart_depth + 1)
                                             else:
                                                 return False
@@ -638,11 +640,11 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
                     th_h, th_w = shape
                     cx = x1 + loc[0] + th_w // 2
                     cy = y1 + loc[1] + th_h // 2
-                    time.sleep(0.5)
+                    rsleep(0.5)
                     tap(cx, cy)
                     print(f'[CLAN CAPITAL] ✅ tapped {name} at ({cx}, {cy})')
                     _save_last_cc_tpl(name)
-                    time.sleep(0.5)
+                    rsleep(0.5)
                     if not clan_capital_phase2():
                         return False
                     else:
@@ -664,7 +666,7 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
                                         boot_recovery()
                                         ensure_home_base()
                                         tap(140, 606)
-                                        time.sleep(0.6)
+                                        rsleep(0.6)
                                         return clan_capital(cfg, threshold=threshold, _restart_depth=_restart_depth + 1)
                                     else:
                                         return False
@@ -702,7 +704,7 @@ def clan_capital_phase2(threshold_pct: int=CC_THRESH_PCT) -> bool:
                 break
             else:
                 tap(*pos)
-                time.sleep(0.5)
+                rsleep(0.5)
                 shot_path = take_screenshot('cc_after_popup.png')
                 img = imread_unicode(shot_path, cv2.IMREAD_COLOR)
                 if img is None or img.size == 0:
@@ -748,7 +750,7 @@ def clan_capital_phase3(prev_img=None, capital_hall_level: int=9) -> dict:
         return summary
     else:
         tap(*CC_ENEMY_TAP)
-        time.sleep(0.5)
+        rsleep(0.5)
         pause_event.wait()
         x1, y1, x2, y2, dur = CC_ENEMY_SWIPE
         run_adb(['shell', 'input', 'swipe', str(x1), str(y1), str(x2), str(y2), str(dur)])
@@ -781,7 +783,7 @@ def clan_capital_phase3(prev_img=None, capital_hall_level: int=9) -> dict:
                     pause_event.wait()
                     vx, vy = CC_VILLAGE_COORDS[v]
                     tap(vx, vy)
-                    time.sleep(0.5)
+                    rsleep(0.5)
                     shot = take_screenshot(f'cc_village_{v.replace(' ', '_')}.png')
                     vimg = imread_unicode(shot, cv2.IMREAD_COLOR)
                     pause_event.wait()
@@ -789,7 +791,7 @@ def clan_capital_phase3(prev_img=None, capital_hall_level: int=9) -> dict:
                         print(f'[CC P3] ❌ screenshot failed on {v} → skipping')
                         pause_event.wait()
                         tap(*CC_CLOSE_PANEL)
-                        time.sleep(0.5)
+                        rsleep(0.5)
                         earlier_all_complete = False
                     else:
                         pause_event.wait()
@@ -800,7 +802,7 @@ def clan_capital_phase3(prev_img=None, capital_hall_level: int=9) -> dict:
                         if ok_star:
                             summary['complete'].append(v)
                             tap(*CC_CLOSE_PANEL)
-                            time.sleep(0.5)
+                            rsleep(0.5)
                             earlier_all_complete = earlier_all_complete and True
                         else:
                             avail_tpl2 = os.path.join(CLAN_CAPITAL_DIR, CC_TPL_VILLAGE_AVAIL)
@@ -819,7 +821,7 @@ def clan_capital_phase3(prev_img=None, capital_hall_level: int=9) -> dict:
                                 pause_event.wait()
                                 summary['busy'].append(v)
                                 tap(*CC_CLOSE_PANEL)
-                                time.sleep(0.5)
+                                rsleep(0.5)
                                 earlier_all_complete = False
             pause_event.wait()
             if 'Capital Peak' in unlocked:
@@ -840,7 +842,7 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
                     is_first_attack = _is_capital_peak_fresh(img_pre)
     pause_event.wait()
     tap(*CC_ARMY_WINDOW_TAP)
-    time.sleep(0.5)
+    rsleep(0.5)
     pause_event.wait()
     tpl_ready = os.path.join(CLAN_CAPITAL_DIR, CC_TPL_TROOPS_READY)
     thr = float(threshold_pct) / 100.0 if threshold_pct > 1 else float(threshold_pct)
@@ -871,9 +873,9 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
                 return {'status': 'not_ready', 'troops_found': [], 'spells_found': [], 'drops_done': {'spells': 0, 'troops': 0}, 'attempts': attempts}
             time.sleep(retry_delay)
     pause_event.wait()
-    time.sleep(0.5)
+    rsleep(0.5)
     tap(*CC_ATTACK_TAP)
-    time.sleep(0.5)
+    rsleep(0.5)
     pause_event.wait()
     shot_gold = take_screenshot('cc_phase4_goldcheck.png')
     img_gold = imread_unicode(shot_gold, cv2.IMREAD_COLOR)
@@ -883,7 +885,7 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
     print(f'[CC P4] full-gold win score={gold_score:.2f} thr=0.75')
     if ok_gold:
         tap(*CC_REINITIATE_TAP)
-    time.sleep(1.0)
+    rsleep(1.0)
     pause_event.wait()
     ar_tpl1 = os.path.join(CLAN_CAPITAL_DIR, 'capital_attack_ready.png')
     ar_tpl2 = os.path.join(CLAN_CAPITAL_DIR, 'capital_attack_ready_2.png')
@@ -897,7 +899,7 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
         if img_ar is None or img_ar.size == 0:
             pause_event.wait()
             print(f'[CC P4] ❌ screenshot failed (attack-ready) [try {poll}/{MAX_READY_POLLS}]')
-            time.sleep(0.5)
+            rsleep(0.5)
         else:
             pause_event.wait()
             ok1, s1, _ = _match_gray(img_ar, ar_tpl1, thr_f, roi=CC_ATTACK_READY_ROI)
@@ -908,17 +910,17 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
                 pause_event.wait()
                 chosen = 'capital_attack_ready_2.png' if ok2 and s2 >= s1 else 'capital_attack_ready.png'
                 print(f'[CC P4] ✅ attack-ready detected using {chosen}')
-                time.sleep(0.5)
+                rsleep(0.5)
                 attack_ready = True
                 break
             else:
-                time.sleep(0.7)
+                rsleep(0.7)
     if not attack_ready:
         print(f'[CC P4] ❌ attack-ready timeout after {MAX_READY_POLLS} tries → rebooting and restarting CC')
         boot_recovery()
         ensure_home_base()
         tap(140, 606)
-        time.sleep(0.6)
+        rsleep(0.6)
         return {'status': 'attack_ready_timeout', 'troops_found': [], 'spells_found': [], 'drops_done': {'spells': 0, 'troops': 0}, 'attempts': attempts}
     else:
         pause_event.wait()
@@ -978,20 +980,20 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
                                 px, py = CP_FIRST_DROPPOINTS[t % len(CP_FIRST_DROPPOINTS)]
                                 tap(px, py)
                             drops_troops += taps
-                            time.sleep(0.45)
+                            rsleep(0.45)
                         else:
                             for _ in range(taps):
                                 tap(*sminer_point)
                             drops_troops += taps
-                            time.sleep(0.45)
+                            rsleep(0.45)
                     else:
                         for _ in range(taps):
                             px, py = base_drop_points[k % len(base_drop_points)]
                             tap(px, py)
                             k = (k + stride) % len(base_drop_points)
-                            time.sleep(0.45)
+                            rsleep(0.45)
                         drops_troops += taps
-                        time.sleep(0.45)
+                        rsleep(0.45)
             pause_event.wait()
             drops_spells = 0
             if spells:
@@ -1011,13 +1013,13 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
                         points_seq = [((x1 + x2) // 2, (y1 + y2) // 2)]
                     for j in range(taps_needed):
                         tap(ix, iy)
-                        time.sleep(0.25)
+                        rsleep(0.25)
                         idx = (i + j * 2) % len(points_seq)
                         px, py = points_seq[idx]
                         tap(px, py)
-                        time.sleep(0.35)
+                        rsleep(0.35)
                         drops_spells += 1
-                    time.sleep(0.4)
+                    rsleep(0.4)
             MAX_VERIFY_ROUNDS = 4
             thr_verify = 85
             def _is_jump_or_lightning(name: str) -> bool:
@@ -1112,19 +1114,19 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
                                     taps_needed = 3 if _is_jump_or_lightning(fname) else 1
                                     for j in range(taps_needed):
                                         tap(ix, iy)
-                                        time.sleep(0.25)
+                                        rsleep(0.25)
                                         idx = (i + j * 2) % len(points_seq)
                                         px, py = points_seq[idx]
                                         tap(px, py)
-                                        time.sleep(0.35)
+                                        rsleep(0.35)
                                         drops_spells += 1
-                                    time.sleep(0.4)
+                                    rsleep(0.4)
                             k = 0
                             if troops_redrop:
                                 for fname, (ix, iy, _) in troops_redrop.items():
                                     taps = CC_TROOP_TAP_COUNTS.get(fname, 2)
                                     tap(ix, iy)
-                                    time.sleep(0.15)
+                                    rsleep(0.15)
                                     fname_lower = fname.lower()
                                     if cp_mode == 'fixed' and vname == 'Capital Peak':
                                         for t in range(taps):
@@ -1142,15 +1144,15 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
                                                 else:
                                                     tap(px, py)
                                                     drops_troops += 1
-                                                time.sleep(0.4)
-                                        time.sleep(0.45)
+                                                rsleep(0.4)
+                                        rsleep(0.45)
                                     else:
                                         if fname_lower == 's_miner.png':
                                             target = base_regular_points[0] if base_regular_points else sminer_point
                                             for _ in range(taps):
                                                 tap(*target)
                                                 drops_troops += 1
-                                            time.sleep(0.45)
+                                            rsleep(0.45)
                                         else:
                                             for t in range(taps):
                                                 if not base_regular_points:
@@ -1167,8 +1169,8 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
                                                 else:
                                                     tap(px, py)
                                                     drops_troops += 1
-                                                time.sleep(0.4)
-                                            time.sleep(0.45)
+                                                rsleep(0.4)
+                                            rsleep(0.45)
             return {'status': 'attack_started', 'troops_found': list(troops.keys()), 'spells_found': list(spells.keys()), 'drops_done': {'spells': drops_spells, 'troops': drops_troops}, 'attempts': attempts}
 def _is_capital_peak_fresh(img_bgr) -> bool:
     """Return True if the Capital Peak is fresh (nobody has attacked yet)."""
@@ -1191,6 +1193,21 @@ def tap(x: int, y: int, device: str=None) -> bool:
     _d0, _d1 = ANTIBAN['tap_delay_sec']
     time.sleep(random.uniform(_d0, _d1))
     return proc.returncode == 0
+
+
+def transition_delay():
+    """Случайная человекоподобная пауза между ПЕРЕХОДАМИ (сменами экрана/фазы цикла).
+    Диапазон — config/antiban.json (transition_delay_sec, дефолт 2–6с). Прерывается stop/pause."""
+    pause_event.wait()
+    lo, hi = ANTIBAN['transition_delay_sec']
+    stop_event.wait(timeout=random.uniform(lo, hi))
+
+
+def rsleep(sec, jitter=0.3):
+    """Человекоподобная задержка: базовое `sec` ± jitter (по умолчанию ±30%). Замена фиксированного
+    time.sleep, чтобы паузы не были одинаковыми (анти-бан). Прерывается stop."""
+    sec = float(sec)
+    stop_event.wait(timeout=random.uniform(max(0.0, sec * (1.0 - jitter)), sec * (1.0 + jitter)))
 
 
 def human_between_cycles():
@@ -1240,17 +1257,17 @@ def treasure_event():
     continue_tmpl = Path(TEMPLATE_DIR) / 'continue.png'
     print('Checking if treasure event is active. . .')
     img = capture_array()
-    time.sleep(0.2)
+    rsleep(0.2)
     hammer_score, _, _ = _match_template(img, hammer_tmpl, region=(622, 710, 964, 809), thresh=0.8)
     if hammer_score >= 0.8:
         print('Treasure event detected.')
         print('tapping. . . ')
         for _ in range(4):
-            time.sleep(0.2)
+            rsleep(0.2)
             tap(273, 643)
     else:
         return None
-    time.sleep(4)
+    rsleep(4)
     print('Treasure open successfully.')
     print('Going home. . .')
     tap(788, 751)
@@ -1303,7 +1320,7 @@ def wait_for_scout_screen(timeout=20, interval=2, threshold=0.7) -> bool:
     tpl_h, tpl_w = tpl.shape
     x1, y1, x2, y2 = (2, 612, 222, 724)
     while time.time() - start < timeout:
-        time.sleep(1.5)
+        rsleep(1.5)
         img = capture_array()
         if img is None:
             print('❌ Screenshot failed.')
@@ -1315,7 +1332,7 @@ def wait_for_scout_screen(timeout=20, interval=2, threshold=0.7) -> bool:
         _, max_val, _, _ = cv2.minMaxLoc(res)
         if max_val >= threshold:
             print('[OK] Scouting UI detected.')
-            time.sleep(0.6)
+            rsleep(0.6)
             return True
         time.sleep(interval)
     print('[WARN] Scouting UI never detected.')
@@ -1363,8 +1380,8 @@ def claim_event_cards(max_loops=20):
             print('🎴 Event card — scratching')
             for _ in range(4):                   # скретч: несколько тапов по центру
                 tap(*EVENT_CARD_CENTER)
-                time.sleep(0.4)
-            time.sleep(0.8)
+                rsleep(0.4)
+            rsleep(0.8)
             continue
         cont_score, _, _ = _match_template(img, EVENT_CONTINUE_TEMPLATE,
                                            region=EVENT_CONTINUE_REGION, thresh=0.8)
@@ -1372,14 +1389,14 @@ def claim_event_cards(max_loops=20):
             empty = 0
             print('🎁 Event reward — Continue')
             tap(*EVENT_CONTINUE_CENTER)
-            time.sleep(1.5)
+            rsleep(1.5)
             continue
         # ни карточки, ни награды — возможно анимация вскрытия; подтолкнём тапом центра
         empty += 1
         if empty >= 4:
             return                               # похоже, награды кончились — выходим
         tap(*EVENT_CARD_CENTER)
-        time.sleep(1.0)
+        rsleep(1.0)
 def wait_battle_end():
     """\nWaits up to MAX_WAIT_BATTLE seconds for the battle to finish,\nprinting a single-line countdown via \'\r\'.\n"""
     print('⏳ Waiting for battle to finish…')
@@ -1401,7 +1418,7 @@ def wait_battle_end():
             print('\n[WARN] Connection lost detected—recovering…')
             boot_recovery()
             return
-        time.sleep(1)
+        rsleep(1)
 emulator_key = globals().get('emulator_key', None)
 ld_index = globals().get('ld_index', 0)
 ld_name = globals().get('ld_name', None)
@@ -1421,9 +1438,11 @@ def setup_emulator():
         # BlueStacks: приватный порт adb-сервера бота, чтобы ЧУЖИЕ adb (системный/MEmu,
         # v41) не убивали наш сервер (HD-Adb v36) на общем 5037 → device offline/not found.
         if key == 'bluestacks':
-            os.environ['ANDROID_ADB_SERVER_PORT'] = '5137'
+            os.environ['ANDROID_ADB_SERVER_PORT'] = str(syscfg.emu('bluestacks', 'adb_server_port', 5137))
         if key == 'memu':
-            ensure_memu()
+            # memu_index задан (через «MEmu Multi-Instance») → пер-инстансный путь;
+            # None (обычная кнопка MEmu) → прежний дефолт (инстанс 0, host 21503).
+            ensure_memu(index=globals().get('memu_index', None))
         else:
             if key == 'bluestacks':
                 ensure_bluestacks()
@@ -1450,8 +1469,10 @@ def setup_emulator():
         if pid:
             print(f'🔄 Clash of Clans is running (pid={pid})—restarting...')
             subprocess.run([ADB_BIN, '-s', host, 'shell', 'am', 'force-stop', pkg], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
-            time.sleep(1)
-        subprocess.run([ADB_BIN, '-s', host, 'shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+            rsleep(1)
+        # Кросс-версийный запуск: Android 14/LDPlayer 14 без `monkey` → am start по активности.
+        from app_launch import launch_app
+        launch_app(host, pkg)
         print('✅ Clash of Clans should now be in the foreground.')
 stop_event = threading.Event()
 pause_event = threading.Event()
@@ -1468,9 +1489,9 @@ def _check_stop():
     """Return True if we should abort the current step."""
     return stop_event.is_set()
 def get_stars_from_screen() -> int:
-    time.sleep(0.5)
+    rsleep(0.5)
     shot = take_screenshot('resources_gained.png')
-    time.sleep(0.5)
+    rsleep(0.5)
     img = imread_unicode(shot)
     if img is None:
         return 0
@@ -1499,7 +1520,7 @@ def get_stars_from_screen() -> int:
                     return 2
 def gain_resources(stars: int) -> tuple[int, int, int]:
     """\nRead the GOLD / ELIXIR / DARK-ELIXIR gained on the battle-end screen.\n\nReturns (gold, elixir, dark_elixir), each an *int*.\nIf OCR fails on any field, that field falls back to 0.\n"""
-    time.sleep(0.5)
+    rsleep(0.5)
     img = capture_array()
     if img is None:
         return (0, 0, 0)
@@ -1698,6 +1719,7 @@ def one_cycle(cfg):
         wall_save = False
         return
     treasure_event()
+    transition_delay()                    # человекоподобная пауза между переходами (2–6с)
     pause_event.wait()
     ensure_home_base()
     tap(140, 606)
@@ -1719,9 +1741,11 @@ def one_cycle(cfg):
             return 'STORAGES_FULL'
         _sleep_storages_full(_st)
         return
+    transition_delay()                    # пауза перед зумом (переход)
     print('ZOOMING OUT . . .')
     pause_event.wait()
     multi_zoom_out(host)
+    transition_delay()                    # пауза после зума перед следующей фазой
     if cfg.get('enable_clan_capital', False):
         while not _check_stop():
             pause_event.wait()
@@ -1729,7 +1753,7 @@ def one_cycle(cfg):
             if not started:
                 print('[CC] No attacks available or CC not ready → exiting CC loop.')
                 break
-            time.sleep(1.0)
+            rsleep(1.0)
             print('[CC] Rebooting Clash for next CC pass…')
             boot_recovery()
             if _check_stop():
@@ -1738,7 +1762,7 @@ def one_cycle(cfg):
             print('[CC] Ensuring home base…')
             ensure_home_base()
             tap(140, 606)
-            time.sleep(0.5)
+            rsleep(0.5)
             print('[CC] Zooming out for next CC run…')
             pause_event.wait()
             try:
@@ -1791,7 +1815,7 @@ def one_cycle(cfg):
             wall_save = False
             return
     pause_event.wait()
-    time.sleep(0.5)
+    rsleep(0.5)
     if cfg['request_troops'] and (not _check_stop()):
         if connection_popup_visible():
             print('[WARN] Connection lost → recovering')
@@ -1830,7 +1854,7 @@ def one_cycle(cfg):
             if is_next_button_present():
                 break
             print(f'⚠️ Next button missing—retrying ({attempt}/3)')
-            time.sleep(2)
+            rsleep(2)
         else:
             print('⚠️ Next button still missing after 3 attempts—triggering recovery')
             boot_recovery()
@@ -1884,7 +1908,7 @@ def one_cycle(cfg):
         print('Connection lost detected—recovering…')
         boot_recovery()
         return
-    time.sleep(2)
+    rsleep(2)
     _cycle_count += 1
 
 def bot_loop(cfg):
@@ -1895,14 +1919,14 @@ def bot_loop(cfg):
     pause_event.wait()
     ensure_home_base()
     tap(140, 606)
-    time.sleep(2)
+    rsleep(2)
     pause_event.wait()
     if connection_popup_visible():
         print('Connection lost detected—recovering…')
         boot_recovery()
         ensure_home_base()
         tap(140, 606)
-        time.sleep(2)
+        rsleep(2)
     profiles_dir = os.path.join(BASE_DIR, 'profiles')
     json_paths = glob.glob(os.path.join(profiles_dir, 'Village_*.json'))
     existing_count = len(json_paths)
@@ -1988,7 +2012,7 @@ def bot_loop(cfg):
                 ensure_home_base()
                 pause_event.wait()
                 tap(140, 606)
-                time.sleep(3)
+                rsleep(3)
                 existing_count = accounts_count
             pause_event.wait()
             ensure_home_base()
@@ -1996,12 +2020,23 @@ def bot_loop(cfg):
             print(f'[INFO] → Switching to Village_{idx}')
             bridge.setActiveVillage.emit(idx)
             try:
-                switch_to_village(idx)
+                import emu_driver
+                if emu_driver.account_mode() == 'per_instance':
+                    # Модель B: аккаунт = свой инстанс эмулятора (разные виртуалки).
+                    binding = emu_driver.binding_for(idx)
+                    if binding:
+                        print(f"[INFO] per-instance → {binding['emulator']} #{binding['index']}")
+                        emu_driver.ensure(binding['emulator'], binding['index'])
+                    else:
+                        print(f'[WARN] Village_{idx}: no binding in accounts.json -> staying on current instance')
+                else:
+                    # Модель A: переключение Supercell ID тапами по слотам (FLAG_SECURE).
+                    switch_to_village(idx)
             except Exception as e:
-                # переключение аккаунтов (обход FLAG_SECURE через MEmu-скриншот/AHK)
-                # ненадёжно — не роняем бота, продолжаем на текущем аккаунте.
-                print(f'[WARN] switch_to_village({idx}) failed: {e} — staying on current account')
-            time.sleep(5)
+                # Переключение аккаунтов ненадёжно (FLAG_SECURE / старт инстанса) —
+                # не роняем бота, продолжаем на текущем аккаунте.
+                print(f'[WARN] switch to Village_{idx} failed: {e} — staying on current account')
+            rsleep(5)
             pause_event.wait()
             ensure_home_base()
             tap(140, 606)

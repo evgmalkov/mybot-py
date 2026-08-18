@@ -147,7 +147,7 @@ Supercell ID switcher UI, naming them account_{n}.png.
 """
     dbg('Opening Settings for add_village')
     tap((1534, 649))
-    time.sleep(1)
+    main.rsleep(1)
     tmp = take_screenshot()
     scr0 = imread_unicode(tmp)
     sw_btn = match_one('switch_button.png', scr0, (562, 110, 1333, 282))
@@ -157,10 +157,10 @@ Supercell ID switcher UI, naming them account_{n}.png.
         return
     dbg('Tapping Switch-Account')
     tap(sw_btn)
-    time.sleep(2)
+    main.rsleep(2)
     if main.host == MEMU:
         run_ahk('bypass_screen.ahk')
-        time.sleep(1)
+        main.rsleep(1)
         shot_path = get_latest_memu_screenshot()
     else:
         shot_path = take_screenshot()
@@ -219,9 +219,9 @@ def switch_to_village(idx: int):
     if not coord:
         print(f'[ERROR] Invalid account slot index: {idx}')
         return
-    time.sleep(2)
+    main.rsleep(2)
     tap((1534, 649))                          # открыть Settings
-    time.sleep(1)
+    main.rsleep(1)
     scr = imread_unicode(take_screenshot())
     sw = match_one('switch_button.png', scr, SWITCH_BUTTON_ROI) if scr is not None else None
     if not sw:
