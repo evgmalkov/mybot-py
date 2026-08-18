@@ -1886,6 +1886,8 @@ def one_cycle(cfg):
                 stats['elixir'] = stats.get('elixir', 0) + e_elixir
                 stats['de'] = stats.get('de', 0) + e_dark_elixir
                 stats['attacks'] = stats.get('attacks', 0) + 1
+                print(f"[STATS] attack recorded (village {village_idx}): "
+                      f"total={stats['attacks']} stars={stars_got}")
                 key = str(stars_got)
                 stars_block = stats.setdefault('stars', {'0': 0, '1': 0, '2': 0, '3': 0})
                 stars_block[key] = stars_block.get(key, 0) + 1
@@ -1980,7 +1982,7 @@ def bot_loop(cfg):
     if not cfg['enable_multi_account']:
         pause_event.wait()
         _cycle_count = 0
-        cfg['current_village_idx'] = 1
+        cfg.setdefault('current_village_idx', 1)   # single-режим: беречь per-bot индекс (стат-бакет)
         while not stop_event.is_set():
             pause_event.wait()
             one_cycle(cfg)

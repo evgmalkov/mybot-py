@@ -51,3 +51,6 @@ logs/
 
 # runtime-кэш детекта LDPlayer
 .ldplayer_cache.json
+
+# сохранённый набор ботов (личный рантайм)
+config/bots_layout.json

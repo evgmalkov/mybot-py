@@ -3,7 +3,7 @@
   "enabled": true,
   "gold": 0,
   "elixir": 0,
-  "dark": 1,
+  "dark": 0,
   "sleep_minutes": [
     30,
     60

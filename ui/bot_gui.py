@@ -41,17 +41,16 @@ import atexit
 import socket
 from pathlib import Path
 from updater import Updater
-from PyQt5.QtCore import pyqtSignal, QObject, QPropertyAnimation, pyqtProperty, QEvent, QRect, QSize, QTimer, QEasingCurve, QSequentialAnimationGroup, QVariantAnimation
+from PyQt5.QtCore import QProcess, QProcessEnvironment, pyqtSignal, QObject, QPropertyAnimation, pyqtProperty, QEvent, QRect, QSize, QTimer, QEasingCurve, QSequentialAnimationGroup, QVariantAnimation
 from PyQt5.QtGui import QFont, QPixmap, QTextCursor, QPainter, QColor, QIcon, QBrush
-from PyQt5.QtWidgets import QAbstractSpinBox, QMainWindow, QWidget, QLabel, QLineEdit, QSpinBox, QCheckBox, QPushButton, QTextEdit, QComboBox, QVBoxLayout, QHBoxLayout, QGridLayout, QListWidget, QStackedWidget, QMessageBox, QRadioButton, QButtonGroup, QFrame, QGroupBox, QFormLayout, QGraphicsOpacityEffect, QToolButton, QSizePolicy, QSplashScreen, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+from PyQt5.QtWidgets import QTabBar, QAbstractSpinBox, QMainWindow, QWidget, QLabel, QLineEdit, QSpinBox, QCheckBox, QPushButton, QTextEdit, QComboBox, QVBoxLayout, QHBoxLayout, QGridLayout, QListWidget, QStackedWidget, QMessageBox, QRadioButton, QButtonGroup, QFrame, QGroupBox, QFormLayout, QGraphicsOpacityEffect, QToolButton, QSizePolicy, QSplashScreen, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QDialog
 from PyQt5.QtGui import QColor
 import main
-from main import zero_all_stats_files, pause_bot, resume_bot
+from main import zero_all_stats_files
 from ready_villages import prepare_accounts, save_village_config
 from wizard_bridge import bridge
 from village_wiz import run_village_wizard
-from qt_thread_compat import QtThreadCompat
 from stats_tab import StatsTab
 from ldplayer_manager import list_ld_instances
 from memu_manager import list_memu_instances
@@ -343,6 +342,7 @@ def save_settings(cfg: dict):
 
 FARMING_PATH = os.path.join(BASE_DIR, 'config', 'farming.json')
 ACCOUNTS_PATH = os.path.join(BASE_DIR, 'config', 'accounts.json')
+BOTS_LAYOUT_PATH = os.path.join(BASE_DIR, 'config', 'bots_layout.json')
 
 
 def load_farming_flags():
@@ -671,20 +671,39 @@ class MainWindow(QMainWindow):
         btn.setIconSize(QSize(w, h))
         btn.setFixedSize(w, h)
         btn.setStyleSheet('QPushButton{border:none;background:transparent;}')
+    def _bot_pause_path(self, b):
+        """Файл-флаг паузы бота = <его профиль>.pause (именно его поллит worker-процесс).
+        Привязка к профилю, а не к индексу — устойчиво к закрытию/переносу вкладок."""
+        prof = b.get('profile')
+        if prof and str(prof).endswith('.json'):
+            return str(prof)[:-5] + '.pause'
+        return None
+
+    def _update_pause_icon(self):
+        """Иконка кнопки паузы = состояние активного бота (play=на паузе, stop=работает)."""
+        b = self._bots[self._active_bot]
+        name = 'play_button.png' if b.get('paused') else 'stop_button.png'
+        self._toggle_btn.setIcon(QIcon(QPixmap(os.path.join(TEMPLATES_DIR, name))))
+
     def _on_toggle_pause_play(self):
-        if not self.paused:
-            pause_bot()
-            icon_play = QIcon(QPixmap(os.path.join(TEMPLATES_DIR, 'play_button.png')))
-            self._toggle_btn.setIcon(icon_play)
-            self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(False)
-        else:
-            resume_bot()
-            icon_stop = QIcon(QPixmap(os.path.join(TEMPLATES_DIR, 'stop_button.png')))
-            self._toggle_btn.setIcon(icon_stop)
-            self.start_btn.setEnabled(True)
-            self.stop_btn.setEnabled(True)
-        self.paused = not self.paused
+        """Пауза/резюм АКТИВНОГО бота — через файл-флаг (его worker-процесс поллит)."""
+        b = self._bots[self._active_bot]
+        if not self._proc_alive(b.get('proc')):
+            return                                   # нечего ставить на паузу
+        path = self._bot_pause_path(b)
+        if not path:
+            return
+        paused = not b.get('paused', False)
+        b['paused'] = paused
+        try:
+            if paused:
+                open(path, 'w').close()              # создать флаг → воркер встанет на паузу
+            elif os.path.exists(path):
+                os.remove(path)                      # снять флаг → воркер продолжит
+        except Exception:
+            pass
+        self._log_to_bot(self._active_bot, '[INFO] Bot paused' if paused else '[INFO] Bot resumed')
+        self._update_pause_icon()
     def _stats_file_path(self, village_idx: int) -> Path:
         """\nReturn the Path to “profiles/Village_{village_idx}_stats.json”\n(creating the directory if needed).\n"""
         profiles_dir = Path(BASE_DIR) / 'profiles'
@@ -705,7 +724,7 @@ class MainWindow(QMainWindow):
         if not self.stats_tab.enable_stats_chk.isChecked():
             return None
         else:
-            idx = self.active_village_idx or 1
+            idx = (self._active_bot + 1) if hasattr(self, '_active_bot') else (self.active_village_idx or 1)
             on_disk = self.load_village_stats(idx)
             self.stats_tab.current_village_idx = idx
             self.stats_tab.set_stats_dict(on_disk)
@@ -786,6 +805,434 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, 'Multi-Account', 'Bindings saved to config/accounts.json')
         except Exception as e:
             QMessageBox.warning(self, 'Multi-Account', f'Failed to save: {e}')
+
+    # ── Постоянная верхняя полоса BotInstance (выбор бота; контент ниже меняется) ──
+    def _build_bot_bar(self, parent_layout):
+        """Верхняя полоса: [Bot 1][Bot 2]…[+]. Всегда видна. Переключение бота меняет контекст
+        (пока — запоминаем текущую страницу nav у каждого бота; настройки/runtime — след. шаг)."""
+        # состояние каждого BotInstance: страница nav, настройки (cfg), runtime (эмулятор/инстанс/
+        # аккаунт/процесс). Settings — data-swap; runtime (proc) — живой объект per-bot.
+        # Если сохранён набор (config/bots_layout.json) — восстанавливаем; иначе один бот.
+        layout = self._load_bots_layout()
+        saved = (layout or {}).get('bots') or []
+        self._bots_autostart = bool((layout or {}).get('autostart'))
+        if saved:
+            self._bots, names = [], []
+            for k, sb in enumerate(saved):
+                st = self._new_bot_state()
+                st.update({'emulator': sb.get('emulator', 'memu'), 'index': int(sb.get('index', 0)),
+                           'account': int(sb.get('account', 1)), 'page': int(sb.get('page', 0)),
+                           'cfg': sb.get('cfg')})
+                self._bots.append(st)
+                names.append(sb.get('name') or f'Bot {k + 1}')
+        else:
+            self._bots, names = [self._new_bot_state()], ['Bot 1']
+        self._active_bot = 0
+        self.bot_bar = QTabBar()
+        self.bot_bar.setExpanding(False)
+        self.bot_bar.setDrawBase(False)
+        self.bot_bar.setFont(QFont('Segoe UI', 10, QFont.Bold))
+        self.bot_bar.setStyleSheet(
+            'QTabBar { background: rgba(0,0,0,180); }'
+            ' QTabBar::tab { background:#2A2A2A; color:#EFE2BA; padding:6px 16px; margin:4px 2px 0 2px;'
+            ' border-top-left-radius:8px; border-top-right-radius:8px; }'
+            ' QTabBar::tab:selected { background:#4CAF50; color:#FFF; }')
+        self.bot_bar.setTabsClosable(True)                              # крестик закрытия на вкладках
+        self.bot_bar.tabCloseRequested.connect(self._close_bot)
+        for nm in names:
+            self.bot_bar.addTab(nm)
+        self.bot_bar.addTab('  +  ')      # последняя «вкладка» = добавить бота
+        self._strip_plus_close_btn()      # у «+» крестик не нужен
+        self.bot_bar.currentChanged.connect(self._on_bot_bar_changed)   # подключаем ПОСЛЕ addTab
+        parent_layout.addWidget(self.bot_bar)
+        self._build_bots_controls(parent_layout)
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, self._post_bots_restore)   # применить настройки/автозапуск после сборки UI
+
+    def _new_bot_state(self):
+        return {'cfg': None, 'emulator': 'memu', 'index': 0, 'profile': None,
+                'proc': None, 'stopping': False, 'crashed': False, 'log': []}
+
+    def _build_bots_controls(self, parent_layout):
+        """Компактная строка управления НАБОРОМ ботов: Auto-start + Save. Эмулятор/инстанс — выбор
+        на нижней кнопке Start (диалог), настройки бота — в меню; статус — цветом вкладки."""
+        from PyQt5.QtWidgets import QWidget as _QW
+        row = _QW()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(10, 2, 10, 2)
+        h.setSpacing(8)
+        h.addStretch()
+        self.rt_autostart = QCheckBox('Auto-start on launch')
+        self.rt_autostart.setStyleSheet('color:#EFE2BA;')
+        self.rt_autostart.setToolTip('On next launch: recreate saved bots and start them automatically')
+        h.addWidget(self.rt_autostart)
+        save_btn = QPushButton('💾 Save bots')
+        save_btn.setToolTip('Save current bots (count + per-bot settings) for next launch')
+        save_btn.setStyleSheet('QPushButton{background:#3A6EA5;color:#FFF;border:none;border-radius:6px;'
+                               'padding:4px 12px;} QPushButton:hover{background:#4E86C6;}')
+        save_btn.clicked.connect(self._save_bots_layout)
+        h.addWidget(save_btn)
+        parent_layout.addWidget(row)
+
+    def _load_bots_layout(self):
+        try:
+            with open(BOTS_LAYOUT_PATH, encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def _save_bots_layout(self):
+        """Сохранить набор ботов (кол-во + настройки) для следующего запуска."""
+        try:
+            self._bots[self._active_bot]['cfg'] = self._collect_cfg()
+        except Exception:
+            pass
+        bots = []
+        for i, b in enumerate(self._bots):
+            bots.append({'name': self.bot_bar.tabText(i),
+                         'emulator': b.get('emulator', 'memu'), 'index': int(b.get('index', 0)),
+                         'cfg': b.get('cfg')})
+        data = {'autostart': bool(self.rt_autostart.isChecked()), 'bots': bots}
+        try:
+            with open(BOTS_LAYOUT_PATH, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            note = ('will AUTO-START on next launch.' if data['autostart']
+                    else 'will be restored (not auto-started) on next launch.')
+            QMessageBox.information(self, 'Save bots', f'Saved {len(bots)} bot(s) — {note}\n'
+                                    'Delete config/bots_layout.json to reset to default.')
+        except Exception as e:
+            QMessageBox.warning(self, 'Save bots', f'Failed to save: {e}')
+
+    def _post_bots_restore(self):
+        """После сборки UI: применить настройки активного бота к виджетам + цвета вкладок + автозапуск."""
+        if hasattr(self, 'rt_autostart'):
+            self.rt_autostart.setChecked(getattr(self, '_bots_autostart', False))
+        b = self._bots[self._active_bot]
+        if b.get('cfg'):
+            self._apply_cfg_to_widgets(b['cfg'])
+        for i in range(len(self._bots)):
+            self._set_tab_status(i)
+        self._update_run_buttons()
+        if getattr(self, '_bots_autostart', False):
+            print(f'[BOTS] auto-starting {len(self._bots)} saved bot(s)…')
+            for i, bb in enumerate(self._bots):
+                self._write_bot_profile(bb, i, bb.get('cfg') or {})   # сохранённая cfg + свой стат-бакет
+                self._start_bot(bb, i)
+            self._update_run_buttons()
+
+    def _set_tab_status(self, idx):
+        """Цвет вкладки бота по статусу процесса: зелёный=работает, красный=crashed, обычный=stopped."""
+        if not hasattr(self, 'bot_bar') or idx >= len(self._bots):
+            return
+        b = self._bots[idx]
+        running = self._proc_alive(b.get('proc'))
+        col = QColor('#7CFC7C') if running else (QColor('#FF7676') if b.get('crashed') else QColor('#EFE2BA'))
+        self.bot_bar.setTabTextColor(idx, col)
+
+    def _sync_run_status(self):
+        """Периодически: цвета вкладок + Start/End = реальному состоянию процессов. Ловит случаи,
+        когда finished-сигнал не пришёл (эмулятор закрыт, воркер убит, свёрнуто в трей с гашением)."""
+        if not hasattr(self, 'bot_bar'):
+            return
+        for i in range(len(self._bots)):
+            b = self._bots[i]
+            if b.get('proc') is not None and not self._proc_alive(b.get('proc')):
+                b['proc'] = None                 # процесс мёртв, а сигнал не дошёл → чистим
+            self._set_tab_status(i)
+        self._update_run_buttons()
+
+    def _update_run_buttons(self):
+        """Нижние Start/End — под АКТИВНЫЙ бот (его статус)."""
+        if not hasattr(self, 'start_btn') or not hasattr(self, 'stop_btn'):
+            return
+        b = self._bots[self._active_bot]
+        running = self._proc_alive(b.get('proc'))
+        self.start_btn.setEnabled(not running)
+        self.stop_btn.setEnabled(running)
+
+    def _write_bot_profile(self, b, idx, cfg):
+        """Записать cfg бота во временный профиль profiles/_bot_{idx+1}.json + задать свой стат-бакет.
+        Воркер пишет Stats_{current_village_idx}.json по этому индексу, GUI читает Stats_{active+1} →
+        у каждой вкладки своя статистика без коллизии. Используется on_start и автозапуском."""
+        vidx = idx + 1
+        cfg = dict(cfg or {})
+        cfg['current_village_idx'] = vidx
+        cfg['selected_villages'] = [vidx]
+        b['village'] = vidx
+        prof = os.path.join(str(BASE_DIR), 'profiles', f'_bot_{idx + 1}.json')
+        try:
+            with open(prof, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            b['profile'] = prof
+        except Exception:
+            b['profile'] = None
+
+    def _start_bot(self, b, idx):
+        """Запустить worker-процесс бота: эмулятор/инстанс из состояния + профиль cfg (из меню)."""
+        if self._proc_alive(b.get('proc')):
+            return
+        emu, ins = b.get('emulator', 'memu'), int(b.get('index', 0))
+        tag = f'[Bot {idx + 1} {emu}#{ins}]'
+        entry = os.path.join(str(BASE_DIR), 'run_from_source.py')
+        args = [entry, '--worker', '--emulator', emu, '--index', str(ins)]
+        if b.get('profile'):
+            args += ['--profile', str(b['profile'])]
+        p = QProcess(self)
+        p.setProcessChannelMode(QProcess.MergedChannels)
+        p.setWorkingDirectory(str(BASE_DIR))
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert('PYTHONUNBUFFERED', '1')          # живой вывод в пайп → Logs
+        p.setProcessEnvironment(env)
+        p.readyReadStandardOutput.connect(lambda pr=p, bb=b: self._drain_bot(pr, bb))
+        p.finished.connect(lambda code, st, bb=b: self._bot_finished(bb, code))
+        b['proc'] = p
+        b['stopping'] = False
+        b['crashed'] = False
+        b['paused'] = False                          # свежий старт — не на паузе
+        try:                                         # снять устаревший флаг паузы
+            pf = self._bot_pause_path(b)
+            if pf and os.path.exists(pf):
+                os.remove(pf)
+        except Exception:
+            pass
+        self._log_to_bot(idx, f'{tag} starting…')
+        # GUI обычно под pythonw.exe (sys.stdout=None у детей → print воркера теряется).
+        # Запускаем воркер консольным python.exe: Qt ставит CREATE_NO_WINDOW, окно не всплывает,
+        # а stdout уходит в пайп QProcess → в Logs.
+        exe = str(sys.executable)
+        if exe.lower().endswith('pythonw.exe'):
+            cand = exe[:-len('pythonw.exe')] + 'python.exe'
+            if os.path.exists(cand):
+                exe = cand
+        p.start(exe, args)
+        self._set_tab_status(idx)
+        if self._bots[self._active_bot] is b:
+            self._update_run_buttons()
+            self._update_pause_icon()
+
+    @staticmethod
+    def _proc_alive(p):
+        """Безопасно: жив ли QProcess. Ловит RuntimeError, когда C++-объект уже удалён (при закрытии)."""
+        if p is None:
+            return False
+        try:
+            return p.state() != QProcess.NotRunning
+        except RuntimeError:
+            return False
+
+    def _stop_active_bot(self):
+        b = self._bots[self._active_bot]
+        b['stopping'] = True
+        p = b.get('proc')
+        if p is not None and self._proc_alive(p):
+            p.kill()
+            p.waitForFinished(3000)          # дождаться смерти → повторный Start сразу сработает
+
+    def _bot_finished(self, b, code):
+        b['crashed'] = (not b.get('stopping')) and code != 0
+        b['stopping'] = False
+        b['proc'] = None                     # чистое состояние → следующий Start не блокируется
+        b['paused'] = False
+        try:
+            pf = self._bot_pause_path(b)     # убрать флаг паузы завершённого бота
+            if pf and os.path.exists(pf):
+                os.remove(pf)
+        except OSError:
+            pass
+        try:
+            i = self._bots.index(b)
+            self._set_tab_status(i)
+        except ValueError:
+            pass
+        if self._bots[self._active_bot] is b:
+            self._update_run_buttons()
+            self._update_pause_icon()
+
+    def _log_to_bot(self, idx, raw):
+        """Записать строку в буфер лога бота idx; если он активен — показать во вкладке Logs."""
+        if idx < 0 or idx >= len(self._bots):
+            return
+        entry = f"{time.strftime('%H:%M:%S')} • {raw}"
+        buf = self._bots[idx].setdefault('log', [])
+        buf.append(entry)
+        if len(buf) > 3000:                       # держим последние ~3000 строк
+            del buf[:len(buf) - 3000]
+        if idx == self._active_bot:
+            self._append_log(entry)
+
+    def _drain_bot(self, proc, b):
+        try:
+            data = bytes(proc.readAllStandardOutput()).decode('utf-8', errors='ignore')
+        except Exception:
+            return
+        try:
+            idx = self._bots.index(b)
+        except ValueError:
+            return
+        prefix = f"[Bot {idx + 1} {b.get('emulator', 'memu')}#{int(b.get('index', 0))}]"
+        for line in data.splitlines():
+            if line.strip():
+                self._log_to_bot(idx, f'{prefix} {line}')
+
+    def _plus_index(self):
+        return self.bot_bar.count() - 1
+
+    def _on_bot_bar_changed(self, i):
+        if i == self._plus_index():
+            self._add_bot()               # кликнули по «+»
+        else:
+            self._switch_bot(i)
+
+    def _add_bot(self):
+        n = len(self._bots) + 1
+        self._bots.append(self._new_bot_state())
+        self.bot_bar.blockSignals(True)
+        self.bot_bar.insertTab(self._plus_index(), f'Bot {n}')   # вставить перед «+»
+        self.bot_bar.blockSignals(False)
+        self._strip_plus_close_btn()
+        self.bot_bar.setCurrentIndex(len(self._bots) - 1)        # выбрать нового (→ _switch_bot)
+
+    def _strip_plus_close_btn(self):
+        """Убрать крестик у вкладки «+» (её нельзя закрыть — это кнопка добавления)."""
+        from PyQt5.QtWidgets import QTabBar as _QTabBar
+        pi = self._plus_index()
+        for side in (_QTabBar.RightSide, _QTabBar.LeftSide):
+            btn = self.bot_bar.tabButton(pi, side)
+            if btn is not None:
+                btn.deleteLater()
+                self.bot_bar.setTabButton(pi, side, None)
+
+    def _close_bot(self, i):
+        """Закрыть вкладку бота: погасить его процесс, удалить состояние и вкладку."""
+        if i < 0 or i >= len(self._bots):        # клик по «+» игнорируем
+            return
+        if len(self._bots) <= 1:                 # последний бот не закрываем
+            QMessageBox.information(self, 'Bot', 'At least one bot must remain.')
+            return
+        b = self._bots[i]
+        p = b.get('proc')
+        if p is not None and self._proc_alive(p):
+            b['stopping'] = True
+            try:
+                p.finished.disconnect()
+            except Exception:
+                pass
+            p.kill()
+            p.waitForFinished(3000)
+        b['proc'] = None
+        try:                                     # убрать флаг паузы закрываемого бота
+            pf = self._bot_pause_path(b)
+            if pf and os.path.exists(pf):
+                os.remove(pf)
+        except OSError:
+            pass
+        self._bots.pop(i)
+        target = min(i, len(self._bots) - 1)
+        # _active_bot=-1 → _switch_bot не сохранит виджеты закрытого бота в нового активного
+        self._active_bot = -1
+        self.bot_bar.blockSignals(True)
+        self.bot_bar.removeTab(i)
+        self.bot_bar.setCurrentIndex(target)
+        self.bot_bar.blockSignals(False)
+        self._switch_bot(target)                 # покажет данные нового активного
+        for k in range(len(self._bots)):         # обновить цвета оставшихся вкладок
+            self._set_tab_status(k)
+
+    def _switch_bot(self, i):
+        if i < 0 or i >= len(self._bots):
+            return
+        # Левая навигация НЕ меняется (остаёмся на текущей странице) — меняются только ДАННЫЕ
+        # (настройки бота) + нижние Start/End под активного.
+        if 0 <= self._active_bot < len(self._bots):
+            try:
+                self._bots[self._active_bot]['cfg'] = self._collect_cfg()
+            except Exception:
+                pass
+        self._active_bot = i
+        saved = self._bots[i].get('cfg')
+        if saved:
+            self._apply_cfg_to_widgets(saved)
+        # лог — свой у каждого бота: перерисовать вкладку Logs из буфера активного
+        self.log.clear()
+        for entry in self._bots[i].get('log', []):
+            self._append_log(entry)
+        # статистика активного бота — сразу, не ждать тика таймера
+        try:
+            self._refresh_stats_from_json()
+        except Exception:
+            pass
+        self._update_run_buttons()
+        self._update_pause_icon()
+
+    def _apply_cfg_to_widgets(self, cfg):
+        """Применить cfg-словарь к виджетам (обратное к _collect_cfg). Защищённо: отсутствующие
+        ключи/виджеты пропускаются. Используется при переключении BotInstance."""
+        def _txt(attr, key):
+            w = getattr(self, attr, None)
+            if w is not None and key in cfg:
+                try:
+                    w.setText(str(cfg.get(key, '')))
+                except Exception:
+                    pass
+
+        def _chk(attr, key):
+            w = getattr(self, attr, None)
+            if w is not None and key in cfg:
+                try:
+                    w.setChecked(bool(cfg.get(key)))
+                except Exception:
+                    pass
+
+        def _val(attr, key):
+            w = getattr(self, attr, None)
+            if w is not None and key in cfg:
+                try:
+                    w.setValue(int(cfg.get(key)))
+                except Exception:
+                    pass
+
+        _txt('gold_entry', 'gold_threshold')
+        _txt('elixir_entry', 'elixir_threshold')
+        _txt('dark_entry', 'dark_elixir_threshold')
+        _chk('upgrade_chk', 'upgrade_wall')
+        _chk('full_gold_chk', 'full_gold')
+        _chk('full_elixir_chk', 'full_elixir')
+        _chk('full_dark_chk', 'full_dark')
+        _txt('wall_gold_entry', 'wall_gold_threshold')
+        _txt('wall_elixir_entry', 'wall_elixir_threshold')
+        _val('wall_level_spin', 'wall_level_from' if 'wall_level_from' in cfg else 'wall_level')
+        _val('wall_level_to_spin', 'wall_level_to')
+        _chk('req_chk', 'request_troops')
+        if 'attack' in cfg and hasattr(self, 'attack_combo') and hasattr(self, 'attack_map'):
+            inv = {v: k for k, v in self.attack_map.items()}
+            t = inv.get(cfg.get('attack'))
+            if t:
+                self.attack_combo.setCurrentText(t)
+        if hasattr(self, 'quick_radio') and hasattr(self, 'smart_radio'):
+            (self.quick_radio if cfg.get('train_mode') == 'quick' else self.smart_radio).setChecked(True)
+            try:
+                self._on_train_mode_toggled()
+            except Exception:
+                pass
+        _val('quick_slot_spin', 'quick_slot')
+        _chk('clan_games_toggle', 'enable_clan_games')
+        _chk('clan_capital_toggle', 'enable_clan_capital')
+        _val('cc_level', 'capital_hall_level')
+        _chk('mv_enable_chk', 'enable_multi_account')
+        _val('mv_count_spin', 'multi_count')
+        _val('mv_interval', 'multi_interval_mins')
+        if hasattr(self, 'stats_tab') and hasattr(self.stats_tab, 'enable_stats_chk') and 'enable_stats' in cfg:
+            try:
+                self.stats_tab.enable_stats_chk.setChecked(bool(cfg['enable_stats']))
+            except Exception:
+                pass
+        if 'selected_villages' in cfg and hasattr(self, 'mv_village_widgets'):
+            sel = set(cfg.get('selected_villages') or [])
+            for i2, tup in enumerate(self.mv_village_widgets, start=1):
+                try:
+                    tup[0].setChecked(i2 in sel)
+                except Exception:
+                    pass
 
     def _save_village_config(self, idx: int):
         """\nRead all current UI fields and write them out to Village_{idx}.json,\nbut only if that village was just loaded.\n"""
@@ -896,8 +1343,6 @@ class MainWindow(QMainWindow):
                 save_btn.setEnabled(False)
                 icon.clear()
     def choose_emulator(self):
-        if self.no_host:
-            return self.host
         dlg = EmulatorSelectionDialog(self)
         if dlg.exec_() == QDialog.Accepted:
             choice = dlg.getSelection()
@@ -946,17 +1391,22 @@ class MainWindow(QMainWindow):
                                 main.ld_name = pick.name
                                 self.host = None
                                 port = 6202 + pick.index
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            if sys.platform == 'win32':
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-            try:
-                s.bind(('127.0.0.1', port))
-            except OSError:
-                QMessageBox.warning(self, 'Emulator Busy', f'{choice.capitalize()} appears to be in use by another bot.\nPlease close that bot first.')
-                return None
-            self._emu_socket = s
-            atexit.register(self._emu_socket.close)
-            self.no_host = True
+            # Занятость инстанса определяем по СВОИМ запущенным ботам (не сокет-локом — лок держит
+            # сам worker-процесс; GUI-лок конфликтовал с воркером и с умирающим предшественником).
+            sel_key = getattr(main, 'emulator_key', None)
+            sel_idx = main.memu_index if sel_key == 'memu' else getattr(main, 'ld_index', 0)
+            for j, ob in enumerate(getattr(self, '_bots', [])):
+                if j == self._active_bot:
+                    continue
+                p = ob.get('proc')
+                if (p is not None and p.state() != QProcess.NotRunning
+                        and ob.get('emulator') == sel_key
+                        and int(ob.get('index', 0)) == int(sel_idx or 0)):
+                    QMessageBox.warning(self, 'Emulator Busy',
+                                        f'{choice.capitalize()} appears to be in use by Bot {j + 1}.\n'
+                                        'Choose a different instance or stop that bot first.')
+                    main.emulator_key = None
+                    return None
             main.host = self.host
             return self.host
     def __init__(self):
@@ -964,10 +1414,8 @@ class MainWindow(QMainWindow):
         self.active_village_idx = None
         self.setWindowTitle(f'MyBotPy   v{__version__}')
         self.host = None
-        self.no_host = False
         self.setFixedSize(530, 680)
         self.active_village_idx = None
-        self._worker = None
         self.settings = load_settings()
         self.attack_images = {k: load_attack_assets(k)
             for k in ('Dragon_Attack', 'ElectroDragon_Attack')}
@@ -994,15 +1442,20 @@ class MainWindow(QMainWindow):
         self.req_chk.setChecked(self.settings['request_troops'])
         toggle_font = QFont('Segoe UI', 12, QFont.Bold)
         central = WoodBackground()
-        hroot = QHBoxLayout(central)
-        hroot.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
         self.setCentralWidget(central)
+        self._build_bot_bar(outer)          # ПОСТОЯННАЯ верхняя полоса BotInstance
+        hroot = QHBoxLayout()
+        hroot.setContentsMargins(0, 0, 0, 0)
+        outer.addLayout(hroot)
         nav = QListWidget()
         nav.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         nav.setSpacing(12)
         nav.addItems(['General', 'Army', 'Multi-Village', 'Clan Games', 'Clan Capital', 'Statistics', 'Logs'])
-        nav.insertItem(0, 'Bots')       # головная область: вкладки-экземпляры (страница stack #0)
+        self.nav = nav                  # для переключения страницы при смене BotInstance
         nav.setFont(QFont('Segoe UI', 14, QFont.Bold))
         nav.setStyleSheet('\n            QListWidget {\n                background: rgba(0,0,0,180);\n                color: #EFE2BA;\n                border: none;\n            }\n            QListWidget::item:selected { background: rgba(255,255,255,30); color:#FFF; }\n            QListWidget::item:hover    { background: rgba(255,255,255,15); }\n\n            /* hide vertical scrollbar completely */\n            QScrollBar:vertical { width: 0px; background: transparent; }\n            QScrollBar::handle:vertical,\n            QScrollBar::add-line:vertical,\n            QScrollBar::sub-line:vertical { background: transparent; height: 0px; }\n        ')
         nav.setFixedWidth(160)
@@ -1013,7 +1466,6 @@ class MainWindow(QMainWindow):
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(0)
         nav_layout.addWidget(nav)
-        from main import pause_bot, resume_bot
         self._toggle_btn = ClickBounceButton()
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setCursor(Qt.PointingHandCursor)
@@ -1021,7 +1473,6 @@ class MainWindow(QMainWindow):
         self._toggle_btn.setIconSize(QSize(70, 70))
         self._toggle_btn.setFixedSize(80, 80)
         self._toggle_btn.setStyleSheet('background: none; border: none;')
-        self.paused = False
         self._toggle_btn.clicked.connect(self._on_toggle_pause_play)
         nav_layout.addWidget(self._toggle_btn, alignment=Qt.AlignLeft)
         hroot.addWidget(nav_container)
@@ -1030,8 +1481,6 @@ class MainWindow(QMainWindow):
         hroot.addLayout(right, 1)
         stack = QStackedWidget()
         right.addWidget(stack, 1)
-        self.bots_panel = BotsPanel(self)     # страница #0 (соответствует nav-пункту 'Bots')
-        stack.insertWidget(0, self.bots_panel)
         gen_tab = QWidget()
         grid = QGridLayout(gen_tab)
         grid.setContentsMargins(15, 15, 15, 15)
@@ -1636,7 +2085,12 @@ class MainWindow(QMainWindow):
         stack.addWidget(self.stats_tab)
         self._stats_timer = QTimer(self)
         self._stats_timer.timeout.connect(self._refresh_stats_from_json)
-        self._stats_timer.start(5000)
+        self._stats_timer.start(2000)
+        # синхронизация статуса ботов с реальным состоянием процессов (на случай, если finished-сигнал
+        # не дошёл: закрыт эмулятор, убит воркер и т.п.) — цвета вкладок и кнопки Start/End самокорректируются
+        self._status_timer = QTimer(self)
+        self._status_timer.timeout.connect(self._sync_run_status)
+        self._status_timer.start(1000)
         stack.addWidget(logs_tab)
         self.stream = TimestampStream()
         self.stream.new_line.connect(self._append_log)
@@ -1708,82 +2162,37 @@ class MainWindow(QMainWindow):
         self.log.insertHtml(f'<span class=\'{colour}\'>{line}</span><br>')
         self.log.moveCursor(QTextCursor.End)
     def on_start(self):
+        """Нижний Start — запустить АКТИВНЫЙ бот отдельным worker-процессом. Эмулятор/инстанс —
+        через диалог (лок держит воркер, не GUI). Настройки бота — из меню (пишем во временный профиль)."""
         try:
-            if self._worker and self._worker.is_alive():
+            b = self._bots[self._active_bot]
+            if self._proc_alive(b.get('proc')):
                 return
-            emu = self.choose_emulator()
-            if emu is None and (not getattr(main, 'emulator_key', None)):
-                print('[INFO] Start aborted (no emulator selected).')
+            main.emulator_key = None                      # сброс: отмена диалога → корректный abort
+            self.choose_emulator()                       # выбор эмулятора/инстанса (ставит main.*)
+            key = getattr(main, 'emulator_key', None)
+            if not key:
+                self._log_to_bot(self._active_bot, '[INFO] Start aborted (no emulator selected).')
                 return
-            if emu:
-                owns_lock = hasattr(self, '_emu_socket') and self._emu_socket.fileno() != -1
-                if not owns_lock:
-                    port_map = {MEMU: 6200, BLUESTACKS: 6201, LDPLAYER: 6202}
-                    if getattr(main, 'emulator_key', '') == 'ldplayer':
-                        port = 6202 + int(getattr(main, 'ld_index', 0))
-                    else:
-                        port = port_map.get(self.host, 6299)
-                    test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    if sys.platform == 'win32':
-                        test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-                    try:
-                        test_sock.bind(('127.0.0.1', port))
-                        self._emu_socket = test_sock
-                        atexit.register(self._emu_socket.close)
-                    except OSError:
-                        QMessageBox.warning(self, 'Emulator Busy', 'The emulator you are trying to access is being used by another bot.\n\nClose that bot and press Start again, or restart this bot and choose a different emulator.')
-                        print('[INFO] Start aborted (emulator in use).')
-                        return
-            print(f'[INFO] Using emulator: {emu}')
-            cfg = self._collect_cfg()
-            cfg['stats'] = {}
-            main.stop_event.clear()
-            self._worker = QtThreadCompat(target=main.bot_loop, args=(cfg,), parent=self)
-            self._worker.start()
-            print('[DEBUG] _worker type =', type(self._worker))
-            print('[DEBUG] _worker Qt isRunning =', getattr(self._worker, 'isRunning', None))
-            print('[INFO] Bot started with attack:', cfg['attack'])
-            self._set_inputs_enabled(False)
-            for w in [self.wall_gold_entry, self.wall_elixir_entry, self.wall_level_spin]:
-                w.setEnabled(False)
-                w.setWindowOpacity(0.35)
-            self.stats_tab.enable_stats_chk.setEnabled(False)
-            self.clan_games_toggle.setEnabled(False)
-            self.clan_capital_toggle.setEnabled(False)
-            self.cc_level.setEnabled(False)
-            self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
+            if key == 'memu':
+                idx = getattr(main, 'memu_index', None)
+                idx = idx if idx is not None else 0
+            else:
+                idx = getattr(main, 'ld_index', 0)
+            b['emulator'], b['index'] = key, int(idx or 0)
+            # настройки бота (из меню) → временный профиль для воркера (+ свой стат-бакет)
+            self._write_bot_profile(b, self._active_bot, self._collect_cfg())
+            main.emulator_key = None                      # сбросить, чтобы диалог не залипал на след. боте
+            self._start_bot(b, self._active_bot)
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, 'Startup Error', f'An unexpected error occurred when starting:\n\n{e}')
+
     def on_end(self):
-        main.stop_event.set()
-        if self._worker:
-            self._worker.join(timeout=0.1)
-        print('[INFO] Bot ended and inputs re‑enabled')
-        self._set_inputs_enabled(True)
-        wallOn = self.upgrade_chk.isChecked()
-        for w in (self.wall_gold_entry, self.wall_elixir_entry, self.wall_level_spin):
-            w.setEnabled(wallOn)
-            w.setWindowOpacity(1.0 if wallOn else 0.35)
-        self.clan_games_toggle.setEnabled(True)
-        self.clan_capital_toggle.setEnabled(True)
-        self.cc_level.setEnabled(self.clan_capital_toggle.isChecked())
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.stats_tab.enable_stats_chk.setEnabled(True)
-        if hasattr(self, '_emu_socket'):
-            self._emu_socket.close()
-    def _set_inputs_enabled(self, en: bool):
-        for w in (self.gold_entry, self.elixir_entry, self.dark_entry,
-                  self.upgrade_chk, self.wall_gold_entry, self.wall_elixir_entry,
-                  self.attack_combo, self.mv_enable_chk, self.mv_count_spin,
-                  self.mv_interval, self.delete_btn):
-            w.setEnabled(en)
-        for cb, icon, apply_btn, save_btn in self.mv_village_widgets:
-            apply_btn.setEnabled(en and apply_btn.isEnabled())
-            save_btn.setEnabled(en and save_btn.isEnabled())
-            cb.setEnabled(en and cb.isEnabled())
+        """Нижний End/Stop — остановить АКТИВНЫЙ бот (его worker-процесс)."""
+        self._log_to_bot(self._active_bot, '[INFO] Active bot stopped')
+        self._stop_active_bot()
+        self._update_run_buttons()           # сразу разблокировать Start (не ждать finished-сигнала)
     def _collect_cfg(self):
         cfg = {
             'gold_threshold': int(self.gold_entry.text()),
@@ -1809,6 +2218,9 @@ class MainWindow(QMainWindow):
             'selected_villages': [idx for idx, (cb, icon, apply_btn, _) in enumerate(self.mv_village_widgets, start=1) if cb.isChecked()],
             'current_village_idx': 1,
             'enable_stats': self.stats_tab.enable_stats_chk.isChecked(),
+            'full_gold': self.full_gold_chk.isChecked(),
+            'full_elixir': self.full_elixir_chk.isChecked(),
+            'full_dark': self.full_dark_chk.isChecked(),
         }
         # флаги «стоп при полном» — в config/farming.json (по каким ресурсам ждать полноты)
         try:
@@ -1822,24 +2234,22 @@ class MainWindow(QMainWindow):
         try:
             cfg = self._collect_cfg()
             save_settings(cfg)
-            if getattr(self, '_worker', None) and self._worker.is_alive():
-                main.stop_event.set()
-                self._worker.quit()
-                self._worker.setParent(None)
-            if getattr(self, 'bots_panel', None):
-                self.bots_panel.stop_all()     # погасить все вкладочные боты-процессы
+            for _b in getattr(self, '_bots', []):     # погасить worker-процессы всех ботов
+                pr = _b.get('proc')
+                if pr is not None and self._proc_alive(pr):
+                    _b['stopping'] = True
+                    try:
+                        pr.finished.disconnect()      # не ловить колбэки на удаляемых объектах
+                    except Exception:
+                        pass
+                    pr.kill()
         except Exception as e:
             print(f'[ERROR] during shutdown: {e}')
-        if hasattr(self, '_emu_socket'):
-            try:
-                self._emu_socket.close()
-            except Exception:
-                pass
         super().closeEvent(event)
         QApplication.quit()
 def main_gui():
     app = QApplication.instance()
-    app.setStyleSheet('\n    QLineEdit, QSpinBox, QComboBox, QTextEdit {\n        background: rgba(255,255,255,200);\n        border: 1px solid #5D4037;\n        border-radius: 4px;\n    }\n    QPushButton {\n        background: rgba(100, 100, 100, 200);\n        border: 1px solid #4E342E;\n    }\n    QPushButton:hover {\n        background: rgba(120,120,120,200);\n    }\n    \n    QPushButton#startBtn,\n    QPushButton#endBtn {\n        background: transparent;\n        border: none;\n        padding: 0;          /* let the icon be the exact size */\n    }\n\n    /* keep them transparent in all states */\n    QPushButton#startBtn:hover,\n    QPushButton#endBtn:hover,\n    QPushButton#startBtn:disabled,\n    QPushButton#endBtn:disabled {\n        background: transparent;\n        border: none;\n    }\n\n    /* tiny ‘pressed’ nudge */\n    QPushButton#startBtn:pressed,\n    QPushButton#endBtn:pressed {\n        background: transparent;\n        border: none;\n        padding-top: 1px;    /* subtle sink effect */\n    }\n        \n\n    ')
+    app.setStyleSheet('\n    QToolTip {\n        background: #1E1E1E;\n        color: #EFE2BA;\n        border: 1px solid #5D4037;\n        border-radius: 4px;\n        padding: 4px 6px;\n    }\n    QLineEdit, QSpinBox, QComboBox, QTextEdit {\n        background: rgba(255,255,255,200);\n        border: 1px solid #5D4037;\n        border-radius: 4px;\n    }\n    QPushButton {\n        background: rgba(100, 100, 100, 200);\n        border: 1px solid #4E342E;\n    }\n    QPushButton:hover {\n        background: rgba(120,120,120,200);\n    }\n    \n    QPushButton#startBtn,\n    QPushButton#endBtn {\n        background: transparent;\n        border: none;\n        padding: 0;          /* let the icon be the exact size */\n    }\n\n    /* keep them transparent in all states */\n    QPushButton#startBtn:hover,\n    QPushButton#endBtn:hover,\n    QPushButton#startBtn:disabled,\n    QPushButton#endBtn:disabled {\n        background: transparent;\n        border: none;\n    }\n\n    /* tiny ‘pressed’ nudge */\n    QPushButton#startBtn:pressed,\n    QPushButton#endBtn:pressed {\n        background: transparent;\n        border: none;\n        padding-top: 1px;    /* subtle sink effect */\n    }\n        \n\n    ')
     zero_all_stats_files()
     icon_path = os.path.join(TEMPLATES_DIR, 'app_icon.ico')
     app.setWindowIcon(QIcon(icon_path))

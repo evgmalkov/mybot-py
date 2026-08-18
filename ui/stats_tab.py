@@ -32,6 +32,9 @@ class _ResourceRow(QWidget):
     def set_value(self, n: int):
         self.val_lbl.setText(f'{n:,}')
 
+    def set_text(self, s: str):
+        self.val_lbl.setText(s)
+
 
 class StatsTab(QWidget):
     """Scrollable statistics panel (Overall → Per‑Village → Attack results)."""
@@ -117,21 +120,21 @@ class StatsTab(QWidget):
         line.setFrameShape(QFrame.HLine)
         line.setStyleSheet('color:#666;')
         grid.addWidget(line, 4, 0, 1, 2)
-        l = QLabel('Avg Gold/hr:')
+        l = QLabel('Avg Gold:')
         l.setFont(labelF)
         l.setStyleSheet('color:#FFFFFF;')
         grid.addWidget(l, 5, 0)
         avg_gold_row = _ResourceRow(os.path.join(templates_dir, 'icon_gold.png'), numF, '#EFE2BA')
         grid.addWidget(avg_gold_row, 5, 1)
         self.avg_labels['avg_gold'] = avg_gold_row
-        l = QLabel('Avg Elixir/hr:')
+        l = QLabel('Avg Elixir:')
         l.setFont(labelF)
         l.setStyleSheet('color:#FFFFFF;')
         grid.addWidget(l, 6, 0)
         avg_elixir_row = _ResourceRow(os.path.join(templates_dir, 'icon_elixir.png'), numF, '#EFE2BA')
         grid.addWidget(avg_elixir_row, 6, 1)
         self.avg_labels['avg_elixir'] = avg_elixir_row
-        l = QLabel('Avg DE/hr:')
+        l = QLabel('Avg DE:')
         l.setFont(labelF)
         l.setStyleSheet('color:#FFFFFF;')
         grid.addWidget(l, 7, 0)
@@ -199,23 +202,6 @@ class StatsTab(QWidget):
         session_layout.setContentsMargins(0, 0, 0, 0)
         session_layout.setSpacing(4)
 
-    def add_loot(self, gold: int, elixir: int, de: int, stars: int, village_idx: int | None=None):
-        """Record loot & attack outcome, then update all UI fields."""
-        self.overall['gold'] += gold
-        self.overall['elixir'] += elixir
-        self.overall['de'] += de
-        self.overall['attacks'] += 1
-        self.stars[stars] += 1
-        if village_idx is not None:
-            pv = self.per_village[village_idx]
-            pv['gold'] += gold
-            pv['elixir'] += elixir
-            pv['de'] += de
-            pv['attacks'] += 1
-            if not any((self.tab_vill.tabText(i) == f'Village {village_idx}' for i in range(self.tab_vill.count()))):
-                self._create_village_tab(village_idx)
-        self._refresh_all()
-
     def _refresh_time(self):
         self._refresh_overall_time()
         self._refresh_all()
@@ -229,19 +215,29 @@ class StatsTab(QWidget):
         self.row_elixir.set_value(self.overall['elixir'])
         self.row_de.set_value(self.overall['de'])
         self.val_att.setText(str(self.overall['attacks']))
-        elapsed_h = max(0.0002777777777777778, (time.time() - self.start_ts) / 3600)
-        avg_gold = int(self.overall['gold'] / elapsed_h)
-        avg_elixir = int(self.overall['elixir'] / elapsed_h)
-        avg_de = int(self.overall['de'] / elapsed_h)
-        self.avg_labels['avg_gold'].set_value(avg_gold)
-        self.avg_labels['avg_elixir'].set_value(avg_elixir)
-        self.avg_labels['avg_de'].set_value(avg_de)
-        att = max(1, self.overall['attacks'])
-        avg_g_att = int(self.overall['gold'] / att)
-        avg_e_att = int(self.overall['elixir'] / att)
-        avg_d_att = int(self.overall['de'] / att)
+        # Avg-блок = «среднее на атаку · скорость в час». Скорость в час сглажена: первые
+        # SMOOTH_SECS секунд показываем «—/h» (иначе короткая сессия даёт бессмысленные млн/час).
+        SMOOTH_SECS = 300
+        attacks = self.overall['attacks']
+        att = max(1, attacks)
+        elapsed_s = time.time() - self.start_ts
+        rate_ready = attacks > 0 and elapsed_s >= SMOOTH_SECS
+        elapsed_h = elapsed_s / 3600
+        for key, res in (('avg_gold', 'gold'), ('avg_elixir', 'elixir'), ('avg_de', 'de')):
+            per_att = self.overall[res] // att
+            rate = f'{self._fmt_compact(self.overall[res] / elapsed_h)}/h' if rate_ready else '—/h'
+            self.avg_labels[key].set_text(f'{per_att:,} · {rate}')
         for s in range(4):
             self.lbl_star[s].setText(str(self.stars[s]))
+
+    @staticmethod
+    def _fmt_compact(n: float) -> str:
+        """Компактный формат больших чисел: 13172493 → 13.2M."""
+        n = float(n)
+        for div, suf in ((1e9, 'B'), (1e6, 'M'), (1e3, 'K')):
+            if n >= div:
+                return f'{n / div:.1f}{suf}'
+        return str(int(n))
 
     def set_stats_dict(self, data: dict):
         """

@@ -64,6 +64,25 @@ if "--import-only" in sys.argv:
 # Headless-воркер супервайзера: один эмулятор+инстанс+деревня, без GUI.
 #   run_from_source.py --worker --emulator <memu|ldplayer> --index <N> --village <V>
 if "--worker" in sys.argv:
+    # stdout/stderr воркера — UTF-8 (иначе юникод в print, напр. ▶/→, крашит cp1251-консоль
+    # дочернего процесса). GUI читает вывод как UTF-8.
+    # Под pythonw родитель отдаёт детям sys.stdout/err = None — тогда print падал бы в никуда.
+    # Восстанавливаем из файловых дескрипторов (fd 1/2 = пайп QProcess), затем UTF-8.
+    if sys.stdout is None or sys.stderr is None:
+        try:
+            if sys.stdout is None:
+                sys.stdout = os.fdopen(1, 'w', encoding='utf-8', errors='replace', buffering=1)
+            if sys.stderr is None:
+                sys.stderr = os.fdopen(2, 'w', encoding='utf-8', errors='replace', buffering=1)
+        except Exception:
+            pass
+    # line_buffering=True — иначе при выводе в пайп QProcess Python буферизует блоками (~4КБ)
+    # и строки не доходят в Logs, пока процесс жив. Строчная буферизация = живой лог.
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
+        except Exception:
+            pass
     import main          # settle circular import between main/*_manager
     import mods
     mods.apply()
@@ -77,7 +96,7 @@ if "--worker" in sys.argv:
 
     from worker_run import run_worker
     sys.exit(run_worker(_arg("--emulator", "ldplayer"), _arg("--index", "0"),
-                        _arg("--village", "1")))
+                        _arg("--village", "1"), _arg("--profile", None)))
 
 # import as a normal module so the `if __name__ == "__main__"` block stays put,
 # patch it, then start the GUI ourselves exactly as that block would
