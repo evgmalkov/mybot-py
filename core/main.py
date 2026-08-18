@@ -1915,6 +1915,11 @@ def bot_loop(cfg):
     global _cycle_count
     global _saved_wall_offset
     global wall_save
+    try:
+        from sysdiag import log_virtualization
+        log_virtualization()          # VT-x/Hyper-V авто-проверка в лог старта
+    except Exception:
+        pass
     setup_emulator()
     pause_event.wait()
     ensure_home_base()

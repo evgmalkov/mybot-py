@@ -43,7 +43,7 @@ from pathlib import Path
 from updater import Updater
 from PyQt5.QtCore import pyqtSignal, QObject, QPropertyAnimation, pyqtProperty, QEvent, QRect, QSize, QTimer, QEasingCurve, QSequentialAnimationGroup, QVariantAnimation
 from PyQt5.QtGui import QFont, QPixmap, QTextCursor, QPainter, QColor, QIcon, QBrush
-from PyQt5.QtWidgets import QMainWindow, QWidget, QLabel, QLineEdit, QSpinBox, QCheckBox, QPushButton, QTextEdit, QComboBox, QVBoxLayout, QHBoxLayout, QGridLayout, QListWidget, QStackedWidget, QMessageBox, QRadioButton, QButtonGroup, QFrame, QGroupBox, QFormLayout, QGraphicsOpacityEffect, QToolButton, QSizePolicy, QSplashScreen, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+from PyQt5.QtWidgets import QAbstractSpinBox, QMainWindow, QWidget, QLabel, QLineEdit, QSpinBox, QCheckBox, QPushButton, QTextEdit, QComboBox, QVBoxLayout, QHBoxLayout, QGridLayout, QListWidget, QStackedWidget, QMessageBox, QRadioButton, QButtonGroup, QFrame, QGroupBox, QFormLayout, QGraphicsOpacityEffect, QToolButton, QSizePolicy, QSplashScreen, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QDialog
 from PyQt5.QtGui import QColor
 import main
@@ -55,6 +55,7 @@ from qt_thread_compat import QtThreadCompat
 from stats_tab import StatsTab
 from ldplayer_manager import list_ld_instances
 from memu_manager import list_memu_instances
+from bot_instances import BotsPanel
 from paths import BASE_DIR
 APP_DIR = BASE_DIR
 ATTACK_DIR = os.path.join(APP_DIR, 'attacks')
@@ -1001,6 +1002,7 @@ class MainWindow(QMainWindow):
         nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         nav.setSpacing(12)
         nav.addItems(['General', 'Army', 'Multi-Village', 'Clan Games', 'Clan Capital', 'Statistics', 'Logs'])
+        nav.insertItem(0, 'Bots')       # головная область: вкладки-экземпляры (страница stack #0)
         nav.setFont(QFont('Segoe UI', 14, QFont.Bold))
         nav.setStyleSheet('\n            QListWidget {\n                background: rgba(0,0,0,180);\n                color: #EFE2BA;\n                border: none;\n            }\n            QListWidget::item:selected { background: rgba(255,255,255,30); color:#FFF; }\n            QListWidget::item:hover    { background: rgba(255,255,255,15); }\n\n            /* hide vertical scrollbar completely */\n            QScrollBar:vertical { width: 0px; background: transparent; }\n            QScrollBar::handle:vertical,\n            QScrollBar::add-line:vertical,\n            QScrollBar::sub-line:vertical { background: transparent; height: 0px; }\n        ')
         nav.setFixedWidth(160)
@@ -1028,6 +1030,8 @@ class MainWindow(QMainWindow):
         hroot.addLayout(right, 1)
         stack = QStackedWidget()
         right.addWidget(stack, 1)
+        self.bots_panel = BotsPanel(self)     # страница #0 (соответствует nav-пункту 'Bots')
+        stack.insertWidget(0, self.bots_panel)
         gen_tab = QWidget()
         grid = QGridLayout(gen_tab)
         grid.setContentsMargins(15, 15, 15, 15)
@@ -1448,13 +1452,15 @@ class MainWindow(QMainWindow):
             emu_combo.addItem('MEmu', 'memu')
             emu_combo.addItem('LDPlayer', 'ldplayer')
             emu_combo.setFont(QFont('Segoe UI', 8, QFont.Bold))
-            emu_combo.setFixedWidth(110)
+            emu_combo.setFixedWidth(84)
             row.addWidget(emu_combo)
             idx_spin = QSpinBox()
             idx_spin.setRange(0, 31)
             idx_spin.setPrefix('#')
             idx_spin.setFont(QFont('Segoe UI', 8, QFont.Bold))
-            idx_spin.setFixedWidth(64)
+            idx_spin.setFixedSize(54, 22)                          # компактно — чтобы строка влезала
+            idx_spin.setAlignment(Qt.AlignCenter)
+            idx_spin.setStyleSheet('QSpinBox { color:#1b1b1b; background:#EFE2BA; border-radius:4px; }')
             row.addWidget(idx_spin)
             self.mv_bindings[i] = (emu_combo, idx_spin)
             row.addStretch()
@@ -1820,6 +1826,8 @@ class MainWindow(QMainWindow):
                 main.stop_event.set()
                 self._worker.quit()
                 self._worker.setParent(None)
+            if getattr(self, 'bots_panel', None):
+                self.bots_panel.stop_all()     # погасить все вкладочные боты-процессы
         except Exception as e:
             print(f'[ERROR] during shutdown: {e}')
         if hasattr(self, '_emu_socket'):

@@ -61,6 +61,24 @@ if "--import-only" in sys.argv:
     print(f"\n{ok} imported, {bad} failed")
     sys.exit(0 if bad == 0 else 1)
 
+# Headless-воркер супервайзера: один эмулятор+инстанс+деревня, без GUI.
+#   run_from_source.py --worker --emulator <memu|ldplayer> --index <N> --village <V>
+if "--worker" in sys.argv:
+    import main          # settle circular import between main/*_manager
+    import mods
+    mods.apply()
+
+    def _arg(name, default=None):
+        if name in sys.argv:
+            i = sys.argv.index(name)
+            if i + 1 < len(sys.argv):
+                return sys.argv[i + 1]
+        return default
+
+    from worker_run import run_worker
+    sys.exit(run_worker(_arg("--emulator", "ldplayer"), _arg("--index", "0"),
+                        _arg("--village", "1")))
+
 # import as a normal module so the `if __name__ == "__main__"` block stays put,
 # patch it, then start the GUI ourselves exactly as that block would
 import main          # first, to settle a circular import between main/*_manager
