@@ -54,3 +54,6 @@ logs/
 
 # сохранённый набор ботов (личный рантайм)
 config/bots_layout.json
+
+# MBR-CSV ground-truth dataset (отладочные кадры)
+debug_mbr/
