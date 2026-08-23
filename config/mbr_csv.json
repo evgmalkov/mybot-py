@@ -3,7 +3,7 @@
   "base_margin": 1.5,
   "addtiles_dir": -1,
   "debug_overlay": true,
-  "use_calibration": false,
+  "use_calibration": true,
   "min_confidence": 0.6,
   "max_reproj_px": 8.0
 }
