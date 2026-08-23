@@ -155,6 +155,7 @@ def _load_deploy_cfg():
         "deploy_all_heroes":       bool(d.get("deploy_all_heroes", True)),
         "deploy_all_heroes_delay": float(d.get("deploy_all_heroes_delay_sec", 33)),
         "debug_capture_deploy":    bool(d.get("debug_capture_deploy", False)),
+        "native_calibration":      bool(d.get("native_calibration", False)),
     }
 
 
@@ -531,6 +532,64 @@ def _debug_capture_deploy(attack: str, side: str):
         print(f"[DEBUG] deploy frame capture failed: {e}")
 
 
+# Апексы «статического ромба», на котором сидят фикс-координаты DRAGON_L/R (и прочие PATTERNS).
+# TOP — пересечение верхних рёбер DRAGON_L/DRAGON_R; LEFT/RIGHT — их дальние концы; BOTTOM —
+# зеркало TOP относительно центра. Служит опорой аффина static→calibrated (адаптация под базу).
+STATIC_APEXES = {'TOP': (784, -72), 'RIGHT': (1344, 346), 'BOTTOM': (730, 802), 'LEFT': (170, 384)}
+
+
+def _transform_deploy_coords(deploy_coords, aff):
+    """Прогнать все точки DEPLOY_COORDS через аффин (IsoGrid.to_px). Списки (x,y) и герои
+    {'name','coord'} — оба вида. Возвращает НОВЫЙ dict, исходный не мутируем."""
+    out = {}
+    for k, v in deploy_coords.items():
+        if not isinstance(v, list):
+            out[k] = v
+            continue
+        new = []
+        for item in v:
+            if isinstance(item, dict) and 'coord' in item:
+                d = dict(item)
+                d['coord'] = aff.to_px_int(*item['coord'])
+                new.append(d)
+            elif isinstance(item, (tuple, list)) and len(item) == 2:
+                new.append(aff.to_px_int(item[0], item[1]))
+            else:
+                new.append(item)
+        out[k] = new
+    return out
+
+
+def _calibrate_native(deploy_coords):
+    """Адаптивная геометрия нативной атаки (флаг native_calibration): детект redline →
+    аффин STATIC_APEXES→calibrated → трансформ всех точек. Возвращает новый DEPLOY_COORDS при
+    успехе, иначе None (мягкий fallback на статику — у нативной атаки безопасный дефолт)."""
+    if not DEPLOY_CFG.get("native_calibration"):
+        return None
+    try:
+        import deploy_boundary as db          # noqa: F401 (через mbr_calibration)
+        import mbr_calibration as mc
+        from isometric import IsoGrid
+    except Exception as e:
+        print(f"[CALIB] deps missing: {e} — static coords")
+        return None
+    shot = capture_array()
+    if shot is None:
+        return None
+    grid_ref, res = mc.calibrate_frame(shot)          # тот же gate, что у CSV (conf + reproj)
+    if grid_ref is None:
+        print(f"[CALIB] redline not reliable (detected={res.detected} conf={res.confidence:.2f}) "
+              f"-> static DRAGON coords")
+        return None
+    cT, cR, cB, cL = res.polygon
+    s = STATIC_APEXES
+    aff = IsoGrid.from_correspondences([
+        (s['TOP'][0],    s['TOP'][1],    *cT), (s['RIGHT'][0],  s['RIGHT'][1],  *cR),
+        (s['BOTTOM'][0], s['BOTTOM'][1], *cB), (s['LEFT'][0],   s['LEFT'][1],   *cL)])
+    print(f"[CALIB] native attack calibrated (conf={res.confidence:.2f}) -> adaptive deploy coords")
+    return _transform_deploy_coords(deploy_coords, aff)
+
+
 def _maybe_deploy_all_heroes():
     """Страховка: через DEPLOY_CFG['deploy_all_heroes_delay'] секунд после старта атаки
     высадить ВСЕХ ещё не высаженных героев (у кого есть таб в баре, но нет в _deployed_at).
@@ -830,6 +889,12 @@ def run_attack(cfg: dict|None = None):
     _hero_monitor_done = False
     _deploy_phase = True                         # фаза высадки: после активации героя вернём выбор
     _last_selected = None
+
+    # адаптивная геометрия (флаг native_calibration): точки высадки под РЕАЛЬНУЮ redline этой базы,
+    # чтобы войско не попадало в красную no-deploy зону. Нет достоверного redline → статика.
+    _calibrated = _calibrate_native(DEPLOY_COORDS)
+    if _calibrated is not None:
+        DEPLOY_COORDS = _calibrated
 
     try:
         deploy_event_potions()          # event-only: тотем/DE-лут в центр базы (если есть в баре)
