@@ -67,5 +67,5 @@
   "deploy_all_heroes": true,
   "deploy_all_heroes_delay_sec": 33,
   "debug_capture_deploy": false,
-  "native_calibration": false
+  "native_calibration": true
 }
