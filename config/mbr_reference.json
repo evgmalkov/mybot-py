@@ -1,0 +1,12 @@
+{
+  "_comment": "Reference-геометрия MyBot-MBR как ДАННЫЕ (не magic numbers). Источник: COCBot/MBR Global Variables.au3 g_afRefVillage + g_iGAME_WIDTH/DEFAULT_HEIGHT. Координаты в reference-village 860x780. InnerDiamond — ромб базы в reference-пространстве; outer_adjust — TH-отступы Inner->Outer (MBR колонки 6..9). Наш ConvertToVillagePos воспроизводится аффинно: детект InnerDiamond на экране -> пары (reference-апекс <-> screen-пиксель) -> lstsq -> reference->screen. Прямое масштабирование 1600/860 НЕ применять.",
+  "reference": { "width": 860, "height": 780 },
+  "inner_diamond": { "left": 53, "right": 809, "top": 66, "bottom": 630 },
+  "outer_adjust": { "left": 50, "right": 50, "top": 42, "bottom": 42 },
+  "_variants_note": "InnerDiamond слабо зависит от сценария/раскладки (g_iTree): L=35..56 R=795..809 T=57..68 B=619..636. Взяты значения строки 0 (DS complete) как канонический reference; аффинный солвер по детекту поглощает вариации конкретной базы.",
+  "_source_rows_example": [
+    "[490.34, 53, 809, 66, 630, 473.85, 50, 50, 42, 42]  ; DS complete",
+    "[471.59, 40, 795, 62, 626, 471.59, 50, 50, 42, 42]  ; HM partial",
+    "[462.77, 55, 795, 65, 619, 462.77, 50, 50, 42, 42]  ; SM partial"
+  ]
+}
