@@ -1,21 +1,70 @@
 {
-  "_comment": "Параметры анти-бана (рандомизация поведения). Логика — в коде, значения меняйте тут. tap_jitter_px — разброс точки тапа (px); tap_delay_sec — микропауза после тапа; between_cycles_sec — пауза между циклами; break_chance — вероятность длинного «перерыва» после цикла; break_sec — длительность перерыва. Высадка: deploy_mode — 'chaotic' (DEFAULT: одиночные тапы в ПЕРЕМЕШАННОМ порядке с паузами deploy_tap_delay_sec — не залпом, хаотично в рамках области, надёжно высаживает) | 'chunk' (быстрые батч-тапы, старое) | 'drag' (протяжка свайпом — на многих сборках CoC НЕ высаживает, трактует как панораму; экспериментально). chaotic: deploy_tap_delay_sec — пауза между дропами войск. Герои (быстрее): deploy_hero_tab_delay_sec — пауза после выбора таба героя; deploy_hero_gap_sec — пауза перед следующим героем. drag: deploy_drag_tick_ms/deploy_strokes/deploy_stroke_pause_sec. chunk: deploy_drop_delay_sec/deploy_chunk. deploy_jitter_left/right — разброс точки [dx_min, dx_max, dy_min, dy_max] для левой/правой стороны.",
+  "_comment": "Параметры анти-бана (рандомизация поведения). Логика — в коде, значения меняйте тут. tap_jitter_px — разброс точки тапа (px); tap_delay_sec — микропауза после тапа; between_cycles_sec — пауза между циклами; break_chance — вероятность длинного «перерыва» после цикла; break_sec — длительность перерыва. Высадка: deploy_mode — 'chaotic' (DEFAULT: одиночные тапы в ПЕРЕМЕШАННОМ порядке с паузами deploy_tap_delay_sec — не залпом, хаотично в рамках области, надёжно высаживает) | 'chunk' (быстрые батч-тапы, старое) | 'drag' (протяжка свайпом — на многих сборках CoC НЕ высаживает, трактует как панораму; экспериментально). chaotic: deploy_tap_delay_sec — пауза между дропами войск. Герои (быстрее): deploy_hero_tab_delay_sec — пауза после выбора таба героя; deploy_hero_gap_sec — пауза перед следующим героем. drag: deploy_drag_tick_ms/deploy_strokes/deploy_stroke_pause_sec. chunk: deploy_drop_delay_sec/deploy_chunk. deploy_jitter_left/right — разброс точки [dx_min, dx_max, dy_min, dy_max] для левой/правой стороны. deploy_all_heroes — через deploy_all_heroes_delay_sec после старта атаки высадить всех ещё НЕ высаженных героев (страховка: добить героев, если стратегия не успела); false — выключить. debug_capture_deploy — DEBUG: сохранять ADB-кадр экрана атаки ДО высадки (чёткая красная deploy-граница) в debug_mbr/deploy_frames/ для калибровки детектора линии высадки; только стандартные драконьи атаки; false — выключить (прод).",
   "tap_jitter_px": 5,
-  "tap_delay_sec": [0.08, 0.35],
-  "between_cycles_sec": [8, 25],
-  "transition_delay_sec": [2, 6],
+  "tap_delay_sec": [
+    0.08,
+    0.35
+  ],
+  "between_cycles_sec": [
+    8,
+    25
+  ],
+  "transition_delay_sec": [
+    2,
+    6
+  ],
   "break_chance": 0.05,
-  "break_sec": [60, 240],
+  "break_sec": [
+    60,
+    240
+  ],
   "deploy_mode": "chaotic",
-  "deploy_tap_delay_sec": [0.03, 0.12],
-  "deploy_hero_tab_delay_sec": [0.1, 0.25],
-  "deploy_hero_gap_sec": [0.12, 0.35],
-  "deploy_drag_tick_ms": [70, 130],
-  "deploy_strokes": [2, 4],
-  "deploy_stroke_pause_sec": [0.15, 0.5],
-  "deploy_drop_delay_sec": [0.02, 0.10],
+  "deploy_tap_delay_sec": [
+    0.03,
+    0.12
+  ],
+  "deploy_hero_tab_delay_sec": [
+    0.1,
+    0.25
+  ],
+  "deploy_hero_gap_sec": [
+    0.12,
+    0.35
+  ],
+  "deploy_drag_tick_ms": [
+    70,
+    130
+  ],
+  "deploy_strokes": [
+    2,
+    4
+  ],
+  "deploy_stroke_pause_sec": [
+    0.15,
+    0.5
+  ],
+  "deploy_drop_delay_sec": [
+    0.02,
+    0.1
+  ],
   "deploy_chunk": 6,
-  "deploy_jitter_left": [0, 39, -27, 0],
-  "deploy_jitter_right": [-44, 0, -33, 0],
-  "event_potion_target": [800, 430]
+  "deploy_jitter_left": [
+    0,
+    39,
+    -27,
+    0
+  ],
+  "deploy_jitter_right": [
+    -44,
+    0,
+    -33,
+    0
+  ],
+  "event_potion_target": [
+    800,
+    430
+  ],
+  "deploy_all_heroes": true,
+  "deploy_all_heroes_delay_sec": 33,
+  "debug_capture_deploy": false
 }

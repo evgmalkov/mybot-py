@@ -152,6 +152,9 @@ def _load_deploy_cfg():
         "jitter_right": tuple(d.get("deploy_jitter_right", [-44, 0, -33, 0])),
         "event_target": tuple(d.get("event_potion_target", [800, 430])),
         "chunk":        int(d.get("deploy_chunk", 6)),
+        "deploy_all_heroes":       bool(d.get("deploy_all_heroes", True)),
+        "deploy_all_heroes_delay": float(d.get("deploy_all_heroes_delay_sec", 33)),
+        "debug_capture_deploy":    bool(d.get("debug_capture_deploy", False)),
     }
 
 
@@ -315,6 +318,7 @@ def _ensure_active() -> None:
             pass
     if not _battle_active(force=True):       # бой прерван/закончился?
         raise _AttackAborted("battle interrupted / ended")
+    _maybe_deploy_all_heroes()               # по таймеру — добить всех невысаженных героев
 
 
 def _sleep_monitor(secs: float) -> None:
@@ -503,6 +507,64 @@ def deploy_heroes():
         _deployed_at[hero["name"].lower()] = time.time()   # теперь его можно мониторить
         human_delay(*DEPLOY_CFG["hero_gap"])               # короткая пауза перед следующим героем
 
+_DRAGON_ATTACKS = ("Dragon_Attack", "ElectroDragon_Attack")   # стандартные драконьи атаки
+
+
+def _debug_capture_deploy(attack: str, side: str):
+    """DEBUG (флаг debug_capture_deploy): сохранить кадр экрана атаки ДО высадки — на нём чётко
+    видна красная deploy-граница. Копит датасет для калибровки детектора линии высадки. Только
+    стандартные драконьи атаки (у CSV детект линий ещё не отлажен). Ничего не меняет в бою."""
+    if not DEPLOY_CFG.get("debug_capture_deploy"):
+        return
+    if attack not in _DRAGON_ATTACKS:
+        return
+    try:
+        shot = capture_array()
+        if shot is None:
+            return
+        out_dir = os.path.join(BASE_DIR, "debug_mbr", "deploy_frames")
+        os.makedirs(out_dir, exist_ok=True)
+        fn = os.path.join(out_dir, f"deploy_{attack}_{side}_{int(time.time())}.png")
+        cv2.imwrite(fn, shot)
+        print(f"[DEBUG] deploy frame saved: {os.path.basename(fn)}")
+    except Exception as e:
+        print(f"[DEBUG] deploy frame capture failed: {e}")
+
+
+def _maybe_deploy_all_heroes():
+    """Страховка: через DEPLOY_CFG['deploy_all_heroes_delay'] секунд после старта атаки
+    высадить ВСЕХ ещё не высаженных героев (у кого есть таб в баре, но нет в _deployed_at).
+    Срабатывает один раз за атаку. Вызывается из периодических guard'ов (_ensure_active и
+    цикл speed_up), поэтому покрывает и фазу высадки, и фазу ожидания x4."""
+    if _deploy_all_done[0]:
+        return
+    if not DEPLOY_CFG.get("deploy_all_heroes", True):
+        _deploy_all_done[0] = True                 # выключено конфигом — больше не проверяем
+        return
+    if _attack_started_at[0] <= 0:
+        return                                     # атака ещё не стартовала (или MBR-CSV)
+    if time.time() - _attack_started_at[0] < DEPLOY_CFG["deploy_all_heroes_delay"]:
+        return
+    _deploy_all_done[0] = True                     # ставим ДО тапов — без повторного входа
+    pending = [h for h in DEPLOY_COORDS.get("heroes", [])
+               if TABS.get(h["name"].lower()) and h["name"].lower() not in _deployed_at]
+    if not pending:
+        return
+    print(f"[HERO] +{DEPLOY_CFG['deploy_all_heroes_delay']:.0f}s -> deploying "
+          f"{len(pending)} remaining hero(es)")
+    for hero in pending:
+        key = hero["name"].lower()
+        tab = TABS.get(key)
+        if not tab:
+            continue
+        run_adb(["shell", "input", "tap", *map(str, tab)])   # выбрать таб героя
+        human_delay(*DEPLOY_CFG["hero_tab_delay"])
+        jx, jy = jitterCoord(*hero["coord"])
+        run_adb(["shell", "input", "tap", str(jx), str(jy)]) # высадить героя
+        _deployed_at[key] = time.time()                      # теперь его можно мониторить
+        human_delay(*DEPLOY_CFG["hero_gap"])
+
+
 def deploy_spells(spell_key):
     tab = TABS.get(spell_key)
     if not tab:
@@ -587,6 +649,8 @@ _deploy_phase = False                       # идёт фаза высадки (
 _deployed_at: dict[str, float] = {}        # герой → время высадки (deploy_heroes/MBR).
 _hero_dead_count: dict[str, int] = {}      # подряд «0.0» замеров (подтверждение смерти)
 _hero_monitor_done = False                 # все герои мертвы/активированы — мониторинг стоп
+_attack_started_at = [0.0]                 # время старта атаки (для тайминга «высадить всех героев»)
+_deploy_all_done = [False]                 # страховочная высадка всех героев уже сработала (1 раз/атаку)
 # Только высаженных можно мониторить/жать: тап по карточке НЕвысаженного = его ВЫСАДКА,
 # а не активация способности. Время нужно для ПРОАКТИВНЫХ героев (Warden).
 
@@ -712,6 +776,7 @@ def speed_up(timeout=200):
         if _handle_connection_lost(gray):
             continue                              # popup handled; keep waiting
         monitor_hero_hp(shot)                     # #4: прожать способность героя при низком HP
+        _maybe_deploy_all_heroes()                # по таймеру — добить всех невысаженных героев
         if _speed_button_present(shot):
             print("→ Speeding up battle (x4)")
             run_adb(["shell", "input", "tap", str(SPEED_BUTTON[0]), str(SPEED_BUTTON[1])])
@@ -733,7 +798,7 @@ def run_attack(cfg: dict|None = None):
     # #7 совместимость со стратегиями MyBot-MBR: attack вида "csv:<имя>" исполняется
     # интерпретатором MBR-CSV (папка strategies/), а не встроенной последовательностью.
     if isinstance(attack, str) and attack.startswith("csv:"):
-        import mbr_csv
+        from attacks import mbr_csv          # attacks/ — namespace-пакет, не плоский путь
         mbr_csv.run_csv_attack(mbr_csv.strategy_path(attack[4:]), cfg)
         return
 
@@ -744,6 +809,9 @@ def run_attack(cfg: dict|None = None):
     global DEPLOY_COORDS, TABS, SIDE
     DEPLOY_COORDS = PATTERNS[side]
     SIDE = side
+
+    # DEBUG: кадр с чёткой красной deploy-границей ДО высадки (флаг debug_capture_deploy)
+    _debug_capture_deploy(attack, side)
 
     # #3 человекоподобная пауза перед высадкой: не бьём в ту же секунду, как
     # появилась база (моделируем «осмотр» деревни игроком). ВАЖНО: пауза ДО детекта
@@ -756,6 +824,8 @@ def run_attack(cfg: dict|None = None):
     _hero_last_activate.clear()                  # #4: кулдауны способностей — с чистого листа
     _deployed_at.clear()                         # никого ещё не высадили — не мониторим
     _hero_dead_count.clear()
+    _attack_started_at[0] = time.time()          # старт атаки — отсчёт «высадить всех героев»
+    _deploy_all_done[0] = False                  # страховочная высадка ещё не срабатывала
     global _deploy_phase, _last_selected, _hero_monitor_done
     _hero_monitor_done = False
     _deploy_phase = True                         # фаза высадки: после активации героя вернём выбор
