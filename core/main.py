@@ -1363,26 +1363,67 @@ def battle_ended() -> bool:
     return False
 
 
-def claim_event_cards(max_loops=20):
+def event_reward_present() -> bool:
+    """Есть ли на экране ивент-награда после боя: карточка 'Tap!' ИЛИ кнопка 'Continue'.
+
+    Нужен, чтобы входить в разбор карточек ТОЛЬКО при реальном ивенте. Без него на обычном
+    домашнем экране claim_event_cards делает слепые тапы центра (подталкивает анимацию) —
+    лишние нажатия. Ивент бывает не после каждого боя, поэтому проверяем явно."""
+    img = capture_array()
+    if img is None:
+        return False
+    # Основной маркер — рамка карточки (ловит и промежуточный скретч-кадр, где нет ни
+    # 'Tap!', ни 'Continue'). Плюс прямые совпадения 'Tap!'/'Continue' как быстрый путь.
+    if _event_card_on_screen(img, _load_event_cfg()):
+        return True
+    tap_score, _, _ = _match_template(img, EVENT_TAP_CARD_TEMPLATE,
+                                      region=EVENT_TAP_REGION, thresh=0.7)
+    if tap_score >= 0.7:
+        return True
+    cont_score, _, _ = _match_template(img, EVENT_CONTINUE_TEMPLATE,
+                                       region=EVENT_CONTINUE_REGION, thresh=0.8)
+    return cont_score >= 0.8
+
+
+def _load_event_cfg():
+    """Параметры разбора ивент-наград из config/farming.json (params-in-config)."""
+    import json
+    try:
+        with open(os.path.join(BASE_DIR, 'config', 'farming.json'), encoding='utf-8') as f:
+            d = json.load(f).get('event', {}) or {}
+    except Exception:
+        d = {}
+    return {'scratch_taps': int(d.get('scratch_taps', 4)),
+            'empty_limit': int(d.get('empty_limit', 4)),
+            'max_loops': int(d.get('max_loops', 20)),
+            'tap_delay_sec': tuple(d.get('tap_delay_sec', [1, 4])),
+            'card_template': str(d.get('card_template', 'event_card.png')),
+            'card_roi': tuple(d.get('card_roi', [620, 185, 1010, 285])),
+            'card_thresh_pct': float(d.get('card_thresh_pct', 80))}
+
+
+def _event_card_on_screen(img, ecfg) -> bool:
+    """Экран ивент-карточки на кадре img: матч золотого 'замка' рамки в card_roi.
+    Стабильный маркер во всех состояниях карточки (Tap!/скретч/награда)."""
+    tpl_path = os.path.join(TEMPLATE_DIR, ecfg['card_template'])
+    ok, _, _ = _match_color(img, tpl_path, ecfg['card_thresh_pct'], roi=ecfg['card_roi'])
+    return ok
+
+
+def claim_event_cards(max_loops=None):
     """Ивент после боя: карточки-награды (не всегда). Карточку с «Tap!» надо СКРЕТЧИТЬ
     (несколько тапов по центру), затем показывается награда с кнопкой «Continue».
     Карточек может быть несколько. Обрабатываем по состоянию, пока есть Tap!/Continue,
-    потом выходим (вернёмся на базу)."""
+    потом выходим (вернёмся на базу). Числа тапов/лимитов — из config/farming.json."""
+    ecfg = _load_event_cfg()
+    loops = ecfg['max_loops'] if max_loops is None else int(max_loops)
+    _lo, _hi = ecfg['tap_delay_sec']
     empty = 0
-    for _ in range(max_loops):
+    for _ in range(loops):
         img = capture_array()
         if img is None:
             return
-        tap_score, _, _ = _match_template(img, EVENT_TAP_CARD_TEMPLATE,
-                                          region=EVENT_TAP_REGION, thresh=0.7)
-        if tap_score >= 0.7:
-            empty = 0
-            print('🎴 Event card — scratching')
-            for _ in range(4):                   # скретч: несколько тапов по центру
-                tap(*EVENT_CARD_CENTER)
-                rsleep(0.4)
-            rsleep(0.8)
-            continue
+        # 1) Награда вскрыта → кнопка Continue (проверяем ПЕРВОЙ, чтобы не скретчить поверх).
         cont_score, _, _ = _match_template(img, EVENT_CONTINUE_TEMPLATE,
                                            region=EVENT_CONTINUE_REGION, thresh=0.8)
         if cont_score >= 0.8:
@@ -1391,9 +1432,20 @@ def claim_event_cards(max_loops=20):
             tap(*EVENT_CONTINUE_CENTER)
             rsleep(1.5)
             continue
-        # ни карточки, ни награды — возможно анимация вскрытия; подтолкнём тапом центра
+        # 2) Карточка на экране (Tap! ИЛИ любой скретч-кадр по рамке) → скретчим.
+        tap_score, _, _ = _match_template(img, EVENT_TAP_CARD_TEMPLATE,
+                                          region=EVENT_TAP_REGION, thresh=0.7)
+        if tap_score >= 0.7 or _event_card_on_screen(img, ecfg):
+            empty = 0
+            print('🎴 Event card — scratching')
+            for _ in range(ecfg['scratch_taps']):    # скретч: тапы по центру (число из конфига)
+                tap(*EVENT_CARD_CENTER)
+                stop_event.wait(timeout=random.uniform(_lo, _hi))   # рандом-пауза между тапами
+            rsleep(0.8)
+            continue
+        # 3) Ни награды, ни карточки — возможно анимация перехода; подтолкнём тапом центра.
         empty += 1
-        if empty >= 4:
+        if empty >= ecfg['empty_limit']:
             return                               # похоже, награды кончились — выходим
         tap(*EVENT_CARD_CENTER)
         rsleep(1.0)
@@ -1707,6 +1759,51 @@ def _sleep_storages_full(info):
     stop_event.wait(timeout=mins * 60)
 
 
+def _load_star_bonus_cfg():
+    """Параметры детекта поп-апа Star Bonus из config/farming.json (params-in-config)."""
+    import json
+    try:
+        with open(os.path.join(BASE_DIR, 'config', 'farming.json'), encoding='utf-8') as f:
+            d = json.load(f).get('star_bonus', {}) or {}
+    except Exception:
+        d = {}
+    return {'enabled': bool(d.get('enabled', True)),
+            'template': str(d.get('template', 'star_bonus.png')),
+            'threshold_pct': float(d.get('threshold_pct', 80)),
+            'roi': tuple(d.get('roi', [400, 40, 1200, 170])),
+            'okay_xy': tuple(d.get('okay_xy', [807, 765])),
+            'max_taps': int(d.get('max_taps', 3)),
+            'wait_sec': float(d.get('wait_sec', 1.2))}
+
+
+def dismiss_star_bonus():
+    """Закрыть модалку 'Star Bonus received!' (награда за звёзды лиги), если она висит на
+    домашнем экране в начале цикла. Детект — матч шаблона заголовка в ROI, закрытие — тап по
+    Okay. Повторяем до max_taps (окно иногда сменяется вторым таким же). Возвращает True, если
+    хоть раз закрыли."""
+    scfg = _load_star_bonus_cfg()
+    if not scfg['enabled']:
+        return False
+    tpl_path = os.path.join(TEMPLATE_DIR, scfg['template'])
+    ox, oy = scfg['okay_xy']
+    closed = False
+    for _ in range(max(1, scfg['max_taps'])):
+        if _check_stop():
+            break
+        shot = take_screenshot('star_bonus.png')
+        img = imread_unicode(shot, cv2.IMREAD_COLOR)
+        if img is None:
+            break
+        ok, score, _ = _match_color(img, tpl_path, scfg['threshold_pct'], roi=scfg['roi'])
+        if not ok:
+            break
+        print(f'[POPUP] Star Bonus detected (score={score:.2f}) -> tap Okay')
+        tap(ox, oy)
+        closed = True
+        rsleep(scfg['wait_sec'])
+    return closed
+
+
 def one_cycle(cfg):
     """One attack cycle, abortable and recoverable at each micro-step."""
     global _cycle_count
@@ -1722,6 +1819,7 @@ def one_cycle(cfg):
     transition_delay()                    # человекоподобная пауза между переходами (2–6с)
     pause_event.wait()
     ensure_home_base()
+    dismiss_star_bonus()                  # закрыть 'Star Bonus received!', если перекрыл экран
     tap(140, 606)
     if connection_popup_visible():
         print('[WARN] Connection lost → recovering')
@@ -1867,6 +1965,8 @@ def one_cycle(cfg):
         if e_gold >= cfg['gold_threshold'] and e_elixir >= cfg['elixir_threshold'] and (e_dark_elixir >= cfg['dark_elixir_threshold']):
             print('[INFO] Good base found → attacking')
             attack_fn = ATTACK_FUNCS.get(cfg['attack'])
+            if attack_fn is None and str(cfg['attack']).startswith('csv:'):
+                attack_fn = attack_dispatch      # MBR-CSV: общий run_attack сам роутит по "csv:"
             if not attack_fn:
                 print(f"[ERROR] Unknown attack: {cfg['attack']!r}")
                 return
@@ -1900,7 +2000,10 @@ def one_cycle(cfg):
             else:
                 print(f"[{time.strftime('%H:%M:%S')}] [WORKER] ENABLE_STATS=False, skipping stats update")
             return_home()
-            claim_event_cards()          # ивент: прожать карточки-награды после боя (если есть)
+            rsleep(2)                    # дать деревне прогрузиться перед проверкой поп-апов
+            dismiss_star_bonus()         # после боя мог выпасть 'Star Bonus received!' — закрыть
+            if event_reward_present():   # ивент бывает не всегда — входим только если он есть
+                claim_event_cards()      # прожать карточки-награды; иначе стандартный флоу без тапов
             break
         else:
             print('[INFO] Loot below threshold → next')
@@ -1927,6 +2030,11 @@ def bot_loop(cfg):
     ensure_home_base()
     tap(140, 606)
     rsleep(2)
+    # После запуска игры (в т.ч. после вылета) на домашнем экране мог остаться ивент-экран
+    # награды или 'Star Bonus received!' — прожать/закрыть до входа в основной цикл.
+    if event_reward_present():
+        claim_event_cards()
+    dismiss_star_bonus()
     pause_event.wait()
     if connection_popup_visible():
         print('Connection lost detected—recovering…')
@@ -1934,6 +2042,9 @@ def bot_loop(cfg):
         ensure_home_base()
         tap(140, 606)
         rsleep(2)
+        if event_reward_present():       # рекавери = перезапуск игры → снова возможен ивент-экран
+            claim_event_cards()
+        dismiss_star_bonus()
     profiles_dir = os.path.join(BASE_DIR, 'profiles')
     json_paths = glob.glob(os.path.join(profiles_dir, 'Village_*.json'))
     existing_count = len(json_paths)
