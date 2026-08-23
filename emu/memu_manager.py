@@ -37,20 +37,92 @@ def run(cmd, **kw):
         return ''
 
 
+def _memu_from_dir(base):
+    """Вернуть (MEmu.exe, memuc.exe) из каталога установки, если оба файла есть, иначе None.
+
+    memuc.exe у разных версий лежит либо рядом с MEmu.exe, либо на уровень выше
+    (напр. MEmu.exe в …\\MEmu\\MemuHyperv, а memuc.exe в …\\MEmu)."""
+    if not base or not os.path.isdir(base):
+        return None
+    exe = os.path.join(base, 'MEmu.exe')
+    for memuc in (os.path.join(base, 'memuc.exe'),
+                  os.path.join(os.path.dirname(base), 'memuc.exe')):
+        if os.path.isfile(exe) and os.path.isfile(memuc):
+            return (exe, memuc, None)
+    return None
+
+
+def _memu_dirs_from_app_paths():
+    """Каталоги установки из реестра App Paths (Windows пишет туда полный путь к exe).
+
+    Ключ App Paths\\<exe>: default-значение — полный путь к exe, значение 'Path' —
+    его каталог. Берём каталог exe (для memuc.exe/MEmu.exe). Читаем HKLM и HKCU,
+    оба представления (64/32-бит)."""
+    dirs = []
+    subkey_base = r'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths'
+    for exe in ('memuc.exe', 'MEmu.exe'):
+        subkey = f'{subkey_base}\\{exe}'
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for flag in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+                try:
+                    with winreg.OpenKey(hive, subkey, 0, winreg.KEY_READ | flag) as k:
+                        exe_path, _ = winreg.QueryValueEx(k, None)   # default = полный путь к exe
+                        if exe_path:
+                            dirs.append(os.path.dirname(str(exe_path).strip().strip('"')))
+                        try:
+                            path_val, _ = winreg.QueryValueEx(k, 'Path')
+                            if path_val:
+                                dirs.append(str(path_val).strip().rstrip('\\'))
+                        except OSError:
+                            pass
+                except OSError:
+                    continue
+    return dirs
+
+
+def _memu_dirs_from_registry():
+    """Пути установки MEmu из реестра (authoritative-источник для нестандартных установок).
+
+    MEmu пишет InstallLocation/InstallPath в ключи Uninstall и Microvirt; читаем оба
+    представления реестра (64/32-бит), т.к. установщик может писать в WOW6432Node.
+    Плюс App Paths — резервный источник каталога exe."""
+    dirs = []
+    candidates = [
+        (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microvirt\MEmu', 'InstallPath'),
+        (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MEmu', 'InstallLocation'),
+        (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MEmuPlay', 'InstallLocation'),
+    ]
+    for hive, subkey, value in candidates:
+        for flag in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+            try:
+                with winreg.OpenKey(hive, subkey, 0, winreg.KEY_READ | flag) as k:
+                    path, _ = winreg.QueryValueEx(k, value)
+                    if path:
+                        dirs.append(str(path).strip().rstrip('\\'))
+            except OSError:
+                continue
+    dirs += _memu_dirs_from_app_paths()
+    # уникализируем, сохраняя порядок (Install* приоритетнее App Paths)
+    return list(dict.fromkeys(d for d in dirs if d))
+
+
 def find_memu_tools():
+    # 1) Реестр — покрывает установки вне Program Files (кастомный путь, другой диск).
+    for base in _memu_dirs_from_registry():
+        for sub in ('', 'MemuHyperv'):
+            found = _memu_from_dir(os.path.join(base, sub) if sub else base)
+            if found:
+                return found
+    # 2) Фолбэк — скан всех дисков по типовым путям установки.
     for drive in string.ascii_uppercase:
         root = f'{drive}:\\'
         if not os.path.isdir(root):
             continue
         for pf in ('Program Files', 'Program Files (x86)'):
-            base = os.path.join(root, pf, 'Microvirt', 'MEmu')
-            exe = os.path.join(base, 'MEmu.exe')
-            memuc = os.path.join(base, 'memuc.exe')
-            if not os.path.isfile(exe):
-                continue
-            if not os.path.isfile(memuc):
-                continue
-            return (exe, memuc, None)
+            for sub in ('MEmu', os.path.join('MEmu', 'MemuHyperv')):
+                found = _memu_from_dir(os.path.join(root, pf, 'Microvirt', sub))
+                if found:
+                    return found
     return (None, None, None)
 
 
@@ -276,7 +348,7 @@ def ensure_memu(index=None):
 def _ensure_memu_instance(index):
     memu_exe, memuc_exe, _ = find_memu_tools()
     if not memu_exe or not memuc_exe:
-        print('❌ Could not find a MEmu installation under Program Files.')
+        print('❌ Could not find a MEmu installation (checked registry and Program Files).')
         sys.exit(1)
     vm_idx = str(index)
     host = memu_host(index)
@@ -313,7 +385,7 @@ def _ensure_memu_instance(index):
 def _ensure_memu_default():
     memu_exe, memuc_exe, _ = find_memu_tools()
     if not memu_exe or not memuc_exe:
-        print('❌ Could not find a MEmu installation under Program Files.')
+        print('❌ Could not find a MEmu installation (checked registry and Program Files).')
         print('   → Please install MEmu and retry.')
         sys.exit(1)
     print(f'✅ Found MEmu.exe at: {memu_exe}')
