@@ -52,7 +52,7 @@ def apply():
     # #7 стратегии MyBot-MBR из strategies/*.csv — в выпадающий список атак.
     # Метка «[CSV] имя» → внутреннее «csv:имя» (роутится в attacks.run_attack).
     try:
-        import mbr_csv
+        from attacks import mbr_csv          # attacks/ — namespace-пакет, не плоский путь
         for _name in mbr_csv.list_strategies():
             NEW_ATTACK_CHOICES[f"[CSV] {_name}"] = f"csv:{_name}"
     except Exception as _e:

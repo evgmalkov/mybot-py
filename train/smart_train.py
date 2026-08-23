@@ -433,16 +433,28 @@ def smart_train(cfg):
         print('[SMART] Army window not detected – skipping Army training')
         return None
     print('Army window detected')
-    army_ok = _validate_troops(cfg)
-    siege_ok = _validate_siege()
-    if not army_ok:
-        train_troops(cfg)
+    # MBR-CSV/неизвестная стратегия: состав войск не задан в ARMY_SETS (ключ вида "csv:<имя>").
+    # Не трогаем войска (ожидается заранее собранная под стратегию армия), тренируем только
+    # заклы/осаду — они не зависят от состава. Иначе ARMY_SETS[cfg['attack']] бросил бы KeyError.
+    known_army = cfg.get('attack') in ARMY_SETS
+    if known_army:
+        army_ok = _validate_troops(cfg)
+        if not army_ok:
+            train_troops(cfg)
+    elif str(cfg.get('attack', '')).startswith('csv:'):
+        # MBR-CSV v1: авто-сборка армии не реализована (milestone-2). Явно логируем, чтобы пустая
+        # армия на 2-й атаке диагностировалась как «нет auto-train», а не «CSV сломан».
+        print('[MBR-CSV] Army auto-training is not supported.')
+        print('[MBR-CSV] Using currently prepared troops.')
+    else:
+        print('[SMART] Unknown strategy — army composition not defined; '
+              'keeping barracks troops, training spells/siege only.')
     # Заклы ВСЕГДА через train_spells — он сам решает (skip/rebuild) по точному составу
     # из config/army.json. Старый гейт _validate_spells проверял лишь НАЛИЧИЕ rage+freeze
     # и полноту места, из-за чего чужие/лишние заклы (ивентовые jump/heal и т.п.) не
     # пересобирались до нужного 4×rage/3×freeze.
     train_spells(cfg)
-    if not siege_ok:
+    if not _validate_siege():
         train_slammer()
     print('[SMART] Training complete – closing Army tab')
     tap(CLOSE_ARMY_WINDOW)

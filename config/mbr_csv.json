@@ -1,0 +1,9 @@
+{
+  "_comment": "Параметры MBR-CSV высадки. Геометрия поля — в config/field_iso.json (изосетка). base_margin — тайлов наружу от края поля (базовый отступ линии высадки). addtiles_dir — знак ADDTILES из CSV (-1 = отрицательный addtiles идёт наружу). debug_overlay — сохранять кадр боя с наложенными точками (для калибровки). use_calibration — ДИНАМИЧЕСКАЯ геометрия: строить field-grid из detected redline (vision/deploy_boundary→mbr_calibration) на старте атаки; нет достоверного redline (gate FAIL) → CSV НЕ исполняется, БЕЗ fallback на статику. false = старая статическая изосетка. min_confidence/max_reproj_px — порог gate калибровки.",
+  "base_margin": 1.5,
+  "addtiles_dir": -1,
+  "debug_overlay": true,
+  "use_calibration": false,
+  "min_confidence": 0.6,
+  "max_reproj_px": 8.0
+}
