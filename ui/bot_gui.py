@@ -54,7 +54,6 @@ from village_wiz import run_village_wizard
 from stats_tab import StatsTab
 from ldplayer_manager import list_ld_instances
 from memu_manager import list_memu_instances
-from bot_instances import BotsPanel
 from paths import BASE_DIR
 APP_DIR = BASE_DIR
 ATTACK_DIR = os.path.join(APP_DIR, 'attacks')
@@ -957,7 +956,11 @@ class MainWindow(QMainWindow):
         vidx = idx + 1
         cfg = dict(cfg or {})
         cfg['current_village_idx'] = vidx
-        cfg['selected_villages'] = [vidx]
+        # Режим ротации по деревням (Multi-Village) включён → сохраняем выбранные деревни
+        # из GUI, воркер сам крутит ротацию. Иначе одиночный режим: у вкладки только своя
+        # деревня (её стат-бакет).
+        if not cfg.get('enable_multi_account'):
+            cfg['selected_villages'] = [vidx]
         b['village'] = vidx
         prof = os.path.join(str(BASE_DIR), 'profiles', f'_bot_{idx + 1}.json')
         try:

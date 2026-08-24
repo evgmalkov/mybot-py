@@ -56,9 +56,12 @@ def _build_cfg_from_profile(path) -> dict:
             cfg.update(json.load(f))
     except Exception as e:
         print(f'[worker] profile load failed: {e} — using defaults')
-    cfg['enable_multi_account'] = False
+    # Multi-Village: если профиль GUI включил ротацию по деревням — оставляем её как есть
+    # (воркер сам крутит selected_villages). Иначе принудительно одиночный режим.
+    if not cfg.get('enable_multi_account'):
+        cfg['enable_multi_account'] = False
+        cfg.setdefault('selected_villages', [1])
     cfg.setdefault('current_village_idx', 1)
-    cfg.setdefault('selected_villages', [1])
     return cfg
 
 
