@@ -296,6 +296,18 @@ def _battle_active(force: bool = False) -> bool:
 
 
 _guard_t = [0.0]        # троттлинг тяжёлой части guard'а (скриншот)
+_battle_ui_miss = [0]   # счётчик кадров подряд без боевого UI (позитивная проверка «мы в бою»)
+_battle_ui_seen = [False]  # боевой UI уже видели в этой атаке (guard «вооружён»)
+
+
+def _battle_ui_miss_limit() -> int:
+    """miss_limit из config/farming.json battle_guard (params-in-config); >1 гасит разовые перекрытия."""
+    try:
+        import json
+        with open(os.path.join(BASE_DIR, "config", "farming.json"), encoding="utf-8") as f:
+            return int(json.load(f).get("battle_guard", {}).get("miss_limit", 2))
+    except Exception:
+        return 2
 
 
 def _ensure_active() -> None:
@@ -315,6 +327,23 @@ def _ensure_active() -> None:
     if shot is not None:
         try:
             monitor_hero_hp(shot)           # герой при низком HP → прожать способность
+        except Exception:
+            pass
+        # Позитивная проверка «мы ещё в бою» (Overall Damage в правом-нижнем). ВАЖНО: виджет
+        # появляется НЕ сразу — в pre-deploy/старте боя его ещё нет (иначе ложно прервёт высадку).
+        # Поэтому guard «вооружается»: прерываем ТОЛЬКО если боевой UI УЖЕ видели и он ПРОПАЛ
+        # (= ушли на home/результаты), а не когда его ещё не было. Защита от слепых тапов при
+        # устаревшем шаблоне Return Home сохраняется; ложного аборта на старте высадки нет.
+        try:
+            if main.in_battle_ui(shot):
+                _battle_ui_seen[0] = True
+                _battle_ui_miss[0] = 0
+            elif _battle_ui_seen[0]:          # был бой → пропал → возможно home/конец
+                _battle_ui_miss[0] += 1
+                if _battle_ui_miss[0] >= _battle_ui_miss_limit():
+                    raise _AttackAborted("battle UI absent (home/ended)")
+        except _AttackAborted:
+            raise
         except Exception:
             pass
     if not _battle_active(force=True):       # бой прерван/закончился?
@@ -651,7 +680,8 @@ def retap_heroes():
 # ───────────────────── battle speed-up ─────────────────────
 # Green "1x" button on the right side during battle. Tapping it cycles the
 # battle speed 1x → 2x → 3x → 4x. Fixed UI position (independent of attack side).
-SPEED_BUTTON = (1512, 507)
+# Позиция сдвинулась после апдейта игры (было 1512,507 → стало 1533,435); шаблон тот же.
+SPEED_BUTTON = (1533, 435)
 # 'TRY AGAIN' centre within Templates/Connection_lost.png (977x296).
 TRY_AGAIN_OFFSET = (118, 247)
 CONN_THRESHOLD = 0.6
@@ -852,6 +882,8 @@ def speed_up(timeout=200):
 
 def run_attack(cfg: dict|None = None):
     """Entry called from GUI. Chooses side + executes chosen strategy."""
+    _battle_ui_miss[0] = 0                     # сброс battle-UI guard'а на старте атаки
+    _battle_ui_seen[0] = False                 # guard «не вооружён», пока не увидим боевой UI
     attack = (cfg or {}).get("attack", "Dragon_Attack")
 
     # #7 совместимость со стратегиями MyBot-MBR: attack вида "csv:<имя>" исполняется

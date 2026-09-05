@@ -1363,6 +1363,41 @@ def battle_ended() -> bool:
     return False
 
 
+OVERALL_DAMAGE_TEMPLATE = os.path.join(TEMPLATE_DIR, 'overall_damage.png')
+
+
+def _load_battle_guard_cfg():
+    """Параметры позитивной проверки боевого UI из config/farming.json (params-in-config)."""
+    import json
+    try:
+        with open(os.path.join(BASE_DIR, 'config', 'farming.json'), encoding='utf-8') as f:
+            d = json.load(f).get('battle_guard', {}) or {}
+    except Exception:
+        d = {}
+    return {'enabled': bool(d.get('enabled', True)),
+            'region': tuple(d.get('region', [1250, 590, 1600, 720])),
+            'thresh': float(d.get('thresh', 0.8)),
+            'miss_limit': int(d.get('miss_limit', 2))}
+
+
+def in_battle_ui(img=None) -> bool:
+    """True, если на кадре присутствует боевой UI ('Overall Damage' в правом-нижнем углу).
+
+    Он есть всю атаку (с 0% до экрана результатов) и отсутствует на домашней базе — позитивная
+    проверка «мы ещё в бою» В ДОПОЛНЕНИЕ к battle_ended(). Defense-in-depth: если шаблон Return
+    Home устареет после апдейта игры (как уже было), отсутствие боевого UI остановит слепые тапы
+    высадки на home. Нет кадра → True (fail-open: не прерываем бой из-за сбоя захвата)."""
+    cfg = _load_battle_guard_cfg()
+    if not cfg['enabled']:
+        return True
+    if img is None:
+        img = capture_array()
+    if img is None:
+        return True
+    score, _, _ = _match_template(img, OVERALL_DAMAGE_TEMPLATE, region=cfg['region'], thresh=cfg['thresh'])
+    return score >= cfg['thresh']
+
+
 def event_reward_present() -> bool:
     """Есть ли на экране ивент-награда после боя: карточка 'Tap!' ИЛИ кнопка 'Continue'.
 
@@ -1449,6 +1484,45 @@ def claim_event_cards(max_loops=None):
             return                               # похоже, награды кончились — выходим
         tap(*EVENT_CARD_CENTER)
         rsleep(1.0)
+def _load_event_reward_cfg():
+    """Параметры выбора ивент-награды 3★ из config/farming.json (params-in-config)."""
+    import json
+    try:
+        with open(os.path.join(BASE_DIR, 'config', 'farming.json'), encoding='utf-8') as f:
+            d = json.load(f).get('event_reward', {}) or {}
+    except Exception:
+        d = {}
+    return {'enabled': bool(d.get('enabled', True)),
+            'template': str(d.get('template', 'pick_reward.png')),
+            'region': tuple(d.get('region', [400, 100, 1200, 320])),
+            'thresh': float(d.get('thresh', 0.7)),
+            'card_xy': tuple(d.get('card_xy', [1147, 490]))}
+
+
+def pick_event_reward() -> bool:
+    """EVENT-ONLY: экран выбора награды в КОНЦЕ боя (Victory 3★) — тап по КРАЙНЕЙ ПРАВОЙ карточке
+    (Dark Elixir). После 1 тапа появляется кнопка завершения боя и обычный флоу продолжается.
+
+    Триггер — НАЛИЧИЕ ТЕКСТА 'Dark Elixir' в правой карточке (не общий баннер!), т.к. во время боя
+    бывают ДРУГИЕ экраны награды (войско+золото), где справа НЕ Dark Elixir — их трогать нельзя.
+    Матч ~1.0 только на ресурсном экране, на боевом ~0.23. Тапает ТОЛЬКО при enabled И наличии
+    Dark Elixir (бывает только в ивенте). Возвращает True, если награда выбрана (тап сделан)."""
+    cfg = _load_event_reward_cfg()
+    if not cfg['enabled']:
+        return False
+    img = capture_array()
+    if img is None:
+        return False
+    tpl = os.path.join(TEMPLATE_DIR, cfg['template'])
+    score, _, _ = _match_template(img, tpl, region=cfg['region'], thresh=cfg['thresh'])
+    if score >= cfg['thresh']:
+        print('\n🎁 Event reward (3-star) — picking Dark Elixir (right card)')
+        tap(*cfg['card_xy'])
+        rsleep(1.5)
+        return True
+    return False
+
+
 def wait_battle_end():
     """\nWaits up to MAX_WAIT_BATTLE seconds for the battle to finish,\nprinting a single-line countdown via \'\r\'.\n"""
     print('⏳ Waiting for battle to finish…')
@@ -1458,6 +1532,8 @@ def wait_battle_end():
             print('\n[WARN] Connection lost detected—recovering…')
             boot_recovery()
             return
+        if pick_event_reward():          # ивент 3★: 'Pick a Reward!' → тап Dark Elixir, затем Return Home
+            continue
         if battle_ended():
             print()
             return
