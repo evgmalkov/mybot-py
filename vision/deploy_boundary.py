@@ -147,7 +147,8 @@ def _prep_family(fam, cgap=22.0, topk=16):
 
 
 def detect_deploy_boundary(img, expected_angle=37.0, ang_tol=8.0, min_len=120,
-                           min_support=0.85, wh_target=1.321, wh_tol=0.13) -> DeployBoundaryResult:
+                           min_support=0.85, wh_target=1.321, wh_tol=0.13,
+                           apex_margin_px=140) -> DeployBoundaryResult:
     """Красная deploy-граница как изо-ромб: Hough-линии → ДВА семейства (±expected_angle) →
     ВНЕШНЯЯ пара в каждом → 4 пересечения → апексы TOP/RIGHT/BOTTOM/LEFT.
 
@@ -187,14 +188,29 @@ def detect_deploy_boundary(img, expected_angle=37.0, ang_tol=8.0, min_len=120,
     # Geometry-scored выбор: перебор пар в каждом семействе → 4 пересечения → ромб. Держим ТОЛЬКО
     # ромбы с правильным аспектом W/H≈wh_target (жёсткий изо-инвариант: reference OuterDiamond
     # 856/648≈1.32, подобие сохраняет отношение). Песок/декор дают неверный аспект → отсев.
-    # Скор: высокий support сторон + близость аспекта. Это отсекает раздутый песок и перекос.
-    best = None
+    #
+    # SELECTION POLICY (важно): deploy boundary — ВНЕШНЯЯ граница. Раньше выбирали ромб с МАКС.
+    # support сторон — но это выбирает наиболее насыщенные красным линии, т.е. ВНУТРЕННИЕ СТЕНЫ
+    # (стены дают тот же ±угол и высокий support), а не внешнюю границу. Extreme-c в _outer_pair
+    # тоже не гарантирует внешность: ложные Hough-линии от декора могут иметь offset дальше redline.
+    # Настоящая внешность определяется ЗАМКНУТОЙ ГЕОМЕТРИЕЙ: среди валидных ромбов с вершинами
+    # В КАДРЕ берём САМЫЙ ВНЕШНИЙ (макс. площадь). Но чистая max-area переоценивает: если за
+    # redline существует линия того же угла (грунт/декор/баннер «cannot deploy»), она даёт чуть
+    # больший ромб и «перехлёстывает» настоящую границу. Ключ — OUTER SCORE = area · min_support²:
+    # площадь тянет наружу, а слабый support рёбер (спорная внешняя линия ~0.85 vs настоящий
+    # redline ~0.97) гасит перехлёст. Проверено на 2 якорях: decorated-outer и hug-без-overshoot.
+    # Лексикографика: (outer_score, min_support, mean_support, -aspect_error).
+    # Вершина вне кадра (напр. TOP y<0) — сильный сигнал, что найден не тот quadrilateral → отсев.
+    best = None                                  # (key_tuple, [lines], poly, area, sups)
     for a1, a2 in itertools.combinations(famA, 2):
         pa1, pa2 = _line_params(a1), _line_params(a2)
         for b1, b2 in itertools.combinations(famB, 2):
             pb1, pb2 = _line_params(b1), _line_params(b2)
             verts = [_intersect(p, q) for p in (pa1, pa2) for q in (pb1, pb2)]
             if any(v is None for v in verts):
+                continue
+            # non-finite пересечения (почти параллельные линии) → отсев
+            if any((not np.isfinite(v[0])) or (not np.isfinite(v[1])) for v in verts):
                 continue
             poly = _order_apexes(verts)
             top, rgt, bot, lft = poly
@@ -204,18 +220,27 @@ def detect_deploy_boundary(img, expected_angle=37.0, ang_tol=8.0, min_len=120,
             wh = w / h
             if abs(wh - wh_target) > wh_tol or not _is_convex(poly):
                 continue
+            # Вершины ромба: TOP/BOTTOM у max-зума базы ЛЕГИТИМНО за кадром (истинные пересечения
+            # линий границы), поэтому НЕ требуем строго в кадре — допускаем поле apex_margin_px за
+            # краями. Это калибровочный контракт (off-screen апексы нужны). Но раздутый/перекошенный
+            # ромб уходит ДАЛЕКО за кадр → margin отсекает его, не трогая реальную границу.
+            m = apex_margin_px
+            if not all(-m <= x < W + m and -m <= y < H + m for x, y in poly):
+                continue
             area = cv2.contourArea(np.array(poly, np.float32))
             if not (0.10 * W * H <= area <= 0.85 * W * H):
                 continue
             sups = [a1.support, a2.support, b1.support, b2.support]
-            score = 0.7 * min(sups) + 0.3 * (sum(sups) / 4.0) - 0.6 * abs(wh - wh_target)
-            if best is None or score > best[0]:
-                best = (score, [a1, a2, b1, b2], poly)
+            # ПЕРВИЧНО — outer score (площадь, гашённая слабым support рёбер), далее качество линий
+            outer_score = area * (min(sups) ** 2)
+            key = (outer_score, min(sups), sum(sups) / 4.0, -abs(wh - wh_target))
+            if best is None or key > best[0]:
+                best = (key, [a1, a2, b1, b2], poly, area, sups)
     if best is None:
         return DeployBoundaryResult(False, raw_red=red, lines=all_lines, candidates=all_lines,
-                                    reason='no valid diamond (aspect/geometry)')
+                                    reason='no valid in-frame diamond (aspect/geometry)')
 
-    _, selected, poly = best
+    _, selected, poly, _, _ = best
     sups = [l.support for l in selected]
     conf = float(min(1.0, 0.6 * min(sups) + 0.4 * np.mean(sups)))
     return DeployBoundaryResult(True, confidence=conf, polygon=[[int(x), int(y)] for x, y in poly],
