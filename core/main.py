@@ -1703,8 +1703,28 @@ def _load_stats_from_disk(village_idx: int) -> dict:
         except Exception:
             return {'gold': 0, 'elixir': 0, 'de': 0, 'attacks': 0, 'stars': {'0': 0, '1': 0, '2': 0, '3': 0}, 'last_update_ts': 0}
 # Полные хранилища → сон (параметры в config/farming.json)
-FARM_HUD_REGIONS = {'gold': (1247, 24, 1504, 68), 'elixir': (1247, 110, 1532, 176),
-                    'dark': (1247, 192, 1540, 246)}
+def _load_storage_cfg():
+    """Координаты/цвета детекта полноты хранилищ из config/farming.json → storage_detect
+    (params-in-config: правь координаты/пороги/цвет без кода — игра может сдвинуть HUD после
+    апдейта). Дефолты = прежние захардкоженные константы."""
+    import json
+    try:
+        with open(os.path.join(BASE_DIR, 'config', 'farming.json'), encoding='utf-8') as f:
+            d = json.load(f).get('storage_detect', {}) or {}
+    except Exception:
+        d = {}
+    return {
+        'gold_region': tuple(d.get('gold_region', [1247, 24, 1504, 68])),
+        'elixir_region': tuple(d.get('elixir_region', [1247, 110, 1532, 176])),
+        'dark_bar_x': tuple(d.get('dark_bar_x', [1345, 1512])),
+        'dark_bar_strips': [tuple(s) for s in d.get('dark_bar_strips', [[201, 207], [232, 238]])],
+        'dark_full_thresh': float(d.get('dark_full_thresh', 0.90)),
+        'dark_r_over_g': int(d.get('dark_purple_r_over_g', 10)),
+        'dark_b_over_g': int(d.get('dark_purple_b_over_g', 10)),
+        'dark_max_avg': int(d.get('dark_purple_max_avg', 175)),
+        'dark_col_frac': float(d.get('dark_purple_col_frac', 0.4)),
+        'full_stall_cycles': int(d.get('full_stall_cycles', 3)),
+    }
 
 
 def _load_farming_cfg():
@@ -1750,21 +1770,19 @@ def _bar_empty_frac(img, region):
 
 # Тёмный бар — заливка ФИОЛЕТОВАЯ (сам DE тёмно-фиол.), растёт справа-налево. Меряем долю
 # фиолетовых столбцов по тонким полосам БЕЗ цифр (цифры белые в центре бара). Калибровано:
-# мало→0.00, ~77%→0.47, полный→0.98. Кэп знать не нужно (меряем визуальную заливку).
-DARK_BAR_X = (1345, 1512)
-DARK_BAR_STRIPS = ((201, 207), (232, 238))         # верх/низ бара, вне числа
-DARK_FULL_THRESH = 0.90
-
-
-def _dark_bar_fill(img):
-    """Доля заполнения тёмного бара (0..1) по фиолетовой заливке. Полный ≈ 0.98."""
-    x0, x1 = DARK_BAR_X
+# мало→0.00, ~77%→0.47, полный→0.99. Кэп знать не нужно (меряем визуальную заливку). Координаты
+# бара/полос и пороги цвета — в config/farming.json → storage_detect (params-in-config).
+def _dark_bar_fill(img, sc):
+    """Доля заполнения тёмного бара (0..1) по фиолетовой заливке. Полный ≈ 0.99. sc — из
+    _load_storage_cfg (координаты/цвета правятся в конфиге без кода)."""
+    x0, x1 = sc['dark_bar_x']
     best = 0.0
-    for y0, y1 in DARK_BAR_STRIPS:
+    for y0, y1 in sc['dark_bar_strips']:
         reg = img[y0:y1, x0:x1].astype('int16')
         b, g, r = reg[:, :, 0], reg[:, :, 1], reg[:, :, 2]
-        purple = (r > g + 10) & (b > g + 10) & ((b + g + r) / 3 < 175)
-        best = max(best, float((purple.mean(axis=0) > 0.4).mean()))
+        purple = ((r > g + sc['dark_r_over_g']) & (b > g + sc['dark_b_over_g'])
+                  & ((b + g + r) / 3 < sc['dark_max_avg']))
+        best = max(best, float((purple.mean(axis=0) > sc['dark_col_frac']).mean()))
     return best
 
 
@@ -1774,12 +1792,11 @@ def _dark_bar_fill(img):
 # (надёжно). Состояние по (аккаунт, ресурс), т.к. значения у аккаунтов разные.
 _res_max = {}                                       # (vidx, key) -> макс. виденное значение
 _res_stall = {}                                     # (vidx, key) -> проверок подряд без роста
-FULL_STALL_CYCLES = 3                               # столько проверок без роста → полно
 
 
-def _resource_full_by_growth(vidx, key, value):
+def _resource_full_by_growth(vidx, key, value, stall_cycles):
     """True, если ресурс перестал расти (капнут). Заметный рост (новый максимум) → не полно
-    и сброс счётчика; иначе счётчик++, полно после FULL_STALL_CYCLES."""
+    и сброс счётчика; иначе счётчик++, полно после stall_cycles (config full_stall_cycles)."""
     k = (vidx, key)
     prev = _res_max.get(k, -1)
     if value > prev + max(2000, int(prev * 0.005)):  # заметный рост → ещё фармим
@@ -1789,7 +1806,7 @@ def _resource_full_by_growth(vidx, key, value):
     if value > prev:
         _res_max[k] = value
     _res_stall[k] = _res_stall.get(k, 0) + 1
-    return _res_stall[k] >= FULL_STALL_CYCLES
+    return _res_stall[k] >= stall_cycles
 
 
 def read_storages_full(vidx=1):
@@ -1799,6 +1816,7 @@ def read_storages_full(vidx=1):
     cfg = _load_farming_cfg()
     if not cfg['enabled']:
         return None
+    sc = _load_storage_cfg()                         # координаты/цвета детекта (params-in-config)
     img = capture_array()
     if img is None:
         return None
@@ -1807,20 +1825,20 @@ def read_storages_full(vidx=1):
         if cfg[key] <= 0:
             continue
         any_checked = True
-        x1, y1, x2, y2 = FARM_HUD_REGIONS[key]
+        x1, y1, x2, y2 = sc[f'{key}_region']
         val = digit_ocr.read_int(img[y1:y2, x1:x2]) or 0
         fills[key] = val
-        if not _resource_full_by_growth(vidx, key, val):
+        if not _resource_full_by_growth(vidx, key, val, sc['full_stall_cycles']):
             full = False
     if cfg['dark'] > 0:                              # тёмное — по заливке (растёт справа)
         any_checked = True
-        dfill = _dark_bar_fill(img)
+        dfill = _dark_bar_fill(img, sc)
         fills['dark'] = round(dfill, 2)
-        if dfill < DARK_FULL_THRESH:
+        if dfill < sc['dark_full_thresh']:
             full = False
     if not any_checked:
         return None                                 # ни один ресурс не отмечен — не спим
-    dbg = {k: (v if k == 'dark' else f"{v}/stall{_res_stall.get((vidx, k), 0)}/{FULL_STALL_CYCLES}")
+    dbg = {k: (v if k == 'dark' else f"{v}/stall{_res_stall.get((vidx, k), 0)}/{sc['full_stall_cycles']}")
            for k, v in fills.items()}
     print(f"[STORAGE] {dbg} full={full}")
     return {'full': full, 'fills': fills, 'sleep_min': cfg['sleep_min']}
