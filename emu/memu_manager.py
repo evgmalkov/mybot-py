@@ -337,6 +337,41 @@ def _memu_instance_started(memuc, index) -> bool:
     return any(i['index'] == int(index) and i['started'] for i in list_memu_instances())
 
 
+def _force_restart_instance(memuc_exe, vm_idx):
+    """Жёсткий рестарт ПОВИСШЕЙ MEmu-инстанции: memuc reports 'started', но adb offline/заморожен
+    (screencap timeout → device offline). Обычный ensure_memu такую VM НЕ перезапускает (она
+    'started'), поэтому здесь принудительно stop→start именно этого инстанса (не taskkill MEmu.exe —
+    он убил бы ВСЕ инстансы). Таймауты, чтобы сам stop не подвесил восстановление."""
+    print(f'↻ Force-restarting hung MEmu VM #{vm_idx} (stop → start)…')
+    for verb, tmo in (('stop', 40), ('start', 90)):
+        try:
+            subprocess.run([memuc_exe, verb, '-i', str(vm_idx)], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=tmo, creationflags=CREATE_NO_WINDOW)
+        except Exception as e:
+            print(f'[RECOVERY] memuc {verb} VM #{vm_idx} failed: {e}')
+        time.sleep(3 if verb == 'stop' else LAUNCH_WAIT)
+
+
+def force_restart_current():
+    """Жёсткий рестарт ТЕКУЩЕЙ MEmu VM (по main.host / main.memu_index) — для boot_recovery, когда
+    эмулятор повис (screencap заморожен ИЛИ adb offline). Индекс: main.memu_index, иначе обратный
+    расчёт из порта хоста. Возвращает True, если инстанс снова онлайн после рестарта."""
+    _, memuc_exe, _ = find_memu_tools()
+    if not memuc_exe:
+        print('[RECOVERY] memuc not found — cannot force-restart MEmu')
+        return False
+    idx = getattr(main, 'memu_index', None)
+    if idx is None:
+        host = getattr(main, 'host', '') or ''
+        try:
+            port = int(host.rsplit(':', 1)[-1])
+            idx = (port - MEMU_ADB_BASE) // MEMU_ADB_STEP
+        except Exception:
+            idx = 0
+    _force_restart_instance(memuc_exe, idx)
+    return _connect_host(memu_host(idx))
+
+
 def ensure_memu(index=None):
     """Поднять/настроить MEmu. index=None — прежний одно-инстансный путь; index задан —
     пер-инстансный (модель B: аккаунт=инстанс), хост = memu_host(index)."""
@@ -376,7 +411,11 @@ def _ensure_memu_instance(index):
         subprocess.run([memuc_exe, 'start', '-i', vm_idx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
         time.sleep(LAUNCH_WAIT)
     if not _connect_host(host):
-        sys.exit(1)
+        # VM 'started', но adb не поднимается → инстанс повис. Жёстко рестартим и пробуем снова.
+        _force_restart_instance(memuc_exe, vm_idx)
+        if not _connect_host(host):
+            print('❌ ADB failed to connect after force-restart.')
+            sys.exit(1)
     if not wait_for_settings_icon():
         print('❌ Failed to verify home page.')
         boot_recovery()
