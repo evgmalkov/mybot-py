@@ -3,6 +3,12 @@
 All notable user-facing changes. The bot checks this file on startup and shows
 what's new when an update is available.
 
+## 1.4.4
+- Fixed the battle speed-up "1x" button (a game update moved it down); battles
+  speed up again. Its position/threshold/template now live in
+  `config/antiban.json` (`speed_button_*`) so you can re-align it without code if
+  the game moves it again.
+
 ## 1.4.3
 - One-click in-app update (no git needed): the "Update Available" popup can now
   download and apply the update for you. Your settings, accounts and runtime are

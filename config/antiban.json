@@ -67,5 +67,10 @@
   "deploy_all_heroes": true,
   "deploy_all_heroes_delay_sec": 33,
   "debug_capture_deploy": false,
-  "native_calibration": false
+  "native_calibration": false,
+  "_speed_button_comment": "Кнопка ускорения боя «1x» (тап = 1x→2x→3x→4x), появляется в последнюю минуту боя справа. Игра двигает её после апдейтов — правь тут без кода. speed_button_xy — центр кнопки [x,y] (тап); speed_button_template — шаблон в Templates/ (вид кнопки не менялся, обычно не трогать); speed_button_thresh — порог матча (0..1); speed_button_pad — [dx,dy] полуразмер области поиска вокруг xy (терпит небольшое смещение). Если бот пишет 'speed button did not appear' при видимой кнопке — обнови speed_button_xy по реальному кадру.",
+  "speed_button_xy": [1535, 512],
+  "speed_button_template": "speed_button_1x.png",
+  "speed_button_thresh": 0.8,
+  "speed_button_pad": [90, 60]
 }

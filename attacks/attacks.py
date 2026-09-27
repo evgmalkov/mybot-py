@@ -156,6 +156,11 @@ def _load_deploy_cfg():
         "deploy_all_heroes_delay": float(d.get("deploy_all_heroes_delay_sec", 33)),
         "debug_capture_deploy":    bool(d.get("debug_capture_deploy", False)),
         "native_calibration":      bool(d.get("native_calibration", False)),
+        # Кнопка ускорения боя «1x» (правит без кода — игра двигает её после апдейтов).
+        "speed_button_xy":       tuple(d.get("speed_button_xy", [1535, 512])),
+        "speed_button_template": str(d.get("speed_button_template", "speed_button_1x.png")),
+        "speed_button_thresh":   float(d.get("speed_button_thresh", 0.80)),
+        "speed_button_pad":      tuple(d.get("speed_button_pad", [90, 60])),
     }
 
 
@@ -678,10 +683,10 @@ def retap_heroes():
             human_delay(0.25, 0.6)                 # способности не жмут мгновенно подряд
 
 # ───────────────────── battle speed-up ─────────────────────
-# Green "1x" button on the right side during battle. Tapping it cycles the
-# battle speed 1x → 2x → 3x → 4x. Fixed UI position (independent of attack side).
-# Позиция сдвинулась после апдейта игры (было 1512,507 → стало 1533,435); шаблон тот же.
-SPEED_BUTTON = (1533, 435)
+# Green "1x" button on the right side during battle. Tapping it cycles the battle speed
+# 1x → 2x → 3x → 4x. Позиция/порог/шаблон — в config/antiban.json (params-in-config): игра
+# двигала её после апдейтов (1512,507 → 1533,435 → 1535,512), правится без кода.
+SPEED_BUTTON = tuple(DEPLOY_CFG["speed_button_xy"])
 # 'TRY AGAIN' centre within Templates/Connection_lost.png (977x296).
 TRY_AGAIN_OFFSET = (118, 247)
 CONN_THRESHOLD = 0.6
@@ -695,15 +700,16 @@ def _speed_button_present(shot_bgr):
     срабатывала в начале боя, из-за чего бот «ускорял» пустоту)."""
     global _speed_tpl
     if _speed_tpl is None:
-        _speed_tpl = imread_unicode(os.path.join(TEMPLATE_DIR, "speed_button_1x.png"),
+        _speed_tpl = imread_unicode(os.path.join(TEMPLATE_DIR, DEPLOY_CFG["speed_button_template"]),
                                     cv2.IMREAD_COLOR)
     if _speed_tpl is None:
         return False
     x, y = SPEED_BUTTON
-    reg = shot_bgr[max(0, y - 60):y + 60, max(0, x - 90):x + 90]
+    px, py = DEPLOY_CFG["speed_button_pad"]
+    reg = shot_bgr[max(0, y - py):y + py, max(0, x - px):x + px]
     if reg.shape[0] < _speed_tpl.shape[0] or reg.shape[1] < _speed_tpl.shape[1]:
         return False
-    return float(cv2.matchTemplate(reg, _speed_tpl, cv2.TM_CCOEFF_NORMED).max()) >= 0.80
+    return float(cv2.matchTemplate(reg, _speed_tpl, cv2.TM_CCOEFF_NORMED).max()) >= DEPLOY_CFG["speed_button_thresh"]
 
 def _handle_connection_lost(shot_gray):
     """If the 'Connection lost' popup is up (network dropped mid-attack), tap its
