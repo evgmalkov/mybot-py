@@ -728,15 +728,54 @@ class MainWindow(QMainWindow):
             self.stats_tab.current_village_idx = idx
             self.stats_tab.set_stats_dict(on_disk)
             self.settings['stats'] = on_disk.copy()
-    def on_update_available(self, remote_ver, download_url):
+    def on_update_available(self, remote_ver, download_url, changelog=''):
         dlg = QMessageBox(self)
         dlg.setIcon(QMessageBox.Information)
         dlg.setWindowTitle('Update Available')
         dlg.setText(f'A new version ({remote_ver}) is available.')
-        dlg.setInformativeText('Download now?')
-        dlg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        if dlg.exec_() == QMessageBox.Yes:
+        # Показываем «что нового» из CHANGELOG.md, чтобы пользователь видел изменения.
+        info = ("What's new:\n\n" + changelog + '\n\n') if changelog else ''
+        dlg.setInformativeText(info + 'Update now? (settings and accounts are kept)')
+        # In-app update (без git): «Update now» скачивает и накладывает; «Open GitHub» — ручной путь.
+        yes = dlg.addButton('Update now', QMessageBox.YesRole)
+        dlg.addButton('Open GitHub', QMessageBox.NoRole)
+        cancel = dlg.addButton('Later', QMessageBox.RejectRole)
+        dlg.exec_()
+        clicked = dlg.clickedButton()
+        if clicked is cancel:
+            return
+        if clicked is not yes:                    # «Open GitHub» — прежний ручной путь
             webbrowser.open(download_url)
+            return
+        self._download_url = download_url
+        self._upd_wait = QMessageBox(self)
+        self._upd_wait.setIcon(QMessageBox.Information)
+        self._upd_wait.setWindowTitle('Updating')
+        self._upd_wait.setText('Downloading and applying update…\nPlease wait.')
+        self._upd_wait.setStandardButtons(QMessageBox.NoButton)
+        try:
+            self.updater.apply_finished.connect(self._on_update_applied, Qt.UniqueConnection)
+        except Exception:
+            pass
+        self._upd_wait.show()
+        self.updater.apply_update()
+
+    def _on_update_applied(self, ok, msg):
+        try:
+            self._upd_wait.close()
+        except Exception:
+            pass
+        if ok:
+            QMessageBox.information(self, 'Update', msg)
+        else:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle('Update failed')
+            box.setText(msg)
+            box.setInformativeText('Open the GitHub page to download manually?')
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            if box.exec_() == QMessageBox.Yes:
+                webbrowser.open(getattr(self, '_download_url', 'https://github.com/evgmalkov/mybot-py'))
     def _reload_village_icons(self):
         """\nCalled whenever the wizard finishes cropping new account images.\nReload each account_i.png into its QLabel immediately.\n"""
         for idx, (cb, icon, apply_btn, save_btn) in enumerate(self.mv_village_widgets, start=1):
