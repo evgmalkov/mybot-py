@@ -3,6 +3,10 @@
 All notable user-facing changes. The bot checks this file on startup and shows
 what's new when an update is available.
 
+## 1.4.5
+- Fixed the in-app updater's "Please wait" dialog getting stuck on screen after
+  an update was applied; it now closes cleanly and shows the restart prompt.
+
 ## 1.4.4
 - Fixed the battle speed-up "1x" button (a game update moved it down); battles
   speed up again. Its position/threshold/template now live in

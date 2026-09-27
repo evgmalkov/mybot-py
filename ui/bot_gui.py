@@ -761,8 +761,16 @@ class MainWindow(QMainWindow):
         self.updater.apply_update()
 
     def _on_update_applied(self, ok, msg):
+        # СНАЧАЛА синхронно убрать окно ожидания (hide() мгновенный, в отличие от close(),
+        # чей event придёт только после модалки → окно «Please wait» зависало под ней).
         try:
-            self._upd_wait.close()
+            w = getattr(self, '_upd_wait', None)
+            if w is not None:
+                w.hide()
+                w.deleteLater()
+                self._upd_wait = None
+            from PyQt5.QtWidgets import QApplication
+            QApplication.processEvents()          # дать окну реально исчезнуть до модалки
         except Exception:
             pass
         if ok:
