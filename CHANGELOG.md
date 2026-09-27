@@ -3,6 +3,13 @@
 All notable user-facing changes. The bot checks this file on startup and shows
 what's new when an update is available.
 
+## 1.4.6
+- Fixed the pre-attack army check and auto-retraining after a game UI update:
+  the housing counter was misread (the red "!" warning next to it added a digit,
+  e.g. 352/352 → 352/3521) so training was skipped and the bot attacked with the
+  wrong army. Also re-cut the dragon/balloon troop icons (the army window shrank
+  them) so the composition check detects them again.
+
 ## 1.4.5
 - Fixed the in-app updater's "Please wait" dialog getting stuck on screen after
   an update was applied; it now closes cleanly and shows the restart prompt.
