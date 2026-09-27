@@ -3,6 +3,11 @@
 All notable user-facing changes. The bot checks this file on startup and shows
 what's new when an update is available.
 
+## 1.4.7
+- Re-cut the Electro Dragon troop icon at the new army-window scale so the
+  pre-attack army check works for Electro Dragon armies too (same UI-shrink fix
+  as the dragon/balloon icons in 1.4.6).
+
 ## 1.4.6
 - Fixed the pre-attack army check and auto-retraining after a game UI update:
   the housing counter was misread (the red "!" warning next to it added a digit,
