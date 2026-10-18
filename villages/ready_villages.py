@@ -35,7 +35,6 @@ CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 LOADED_ROI = (1010, 36, 1422, 142)
 LOADED_TPL = os.path.join(TEMPLATE_DIR, 'is_account_loaded.png')
 FOURTH_ROI = (1006, 783, 1313, 858)
-SWITCH_BUTTON_ROI = (562, 110, 1333, 282)
 MEMU = '127.0.0.1:21503'
 BLUESTACKS = '127.0.0.1:5555'
 CROP_RECTS = [(876, 162, 1114, 271), (876, 325, 1114, 431), (876, 486, 1114, 592), (876, 647, 1114, 756), (876, 815, 1114, 894)]
@@ -145,18 +144,9 @@ def add_village(count: int):
 Capture and save the next `count` account slots from the
 Supercell ID switcher UI, naming them account_{n}.png.
 """
-    dbg('Opening Settings for add_village')
-    tap((1534, 649))
-    main.rsleep(1)
-    tmp = take_screenshot()
-    scr0 = imread_unicode(tmp)
-    sw_btn = match_one('switch_button.png', scr0, (562, 110, 1333, 282))
-    if not sw_btn:
-        print('[WARN] Could not find Switch-Account button.')
-        tap((1288, 96))
+    from game_ui import open_account_switcher
+    if not open_account_switcher():
         return
-    dbg('Tapping Switch-Account')
-    tap(sw_btn)
     main.rsleep(2)
     if main.host == MEMU:
         run_ahk('bypass_screen.ahk')
@@ -164,7 +154,7 @@ Supercell ID switcher UI, naming them account_{n}.png.
         shot_path = get_latest_memu_screenshot()
     else:
         shot_path = take_screenshot()
-    scr = imread_unicode(shot_path)
+    scr = imread_unicode(shot_path) if shot_path is not None else None
     if scr is None:
         print('[ERROR] Failed to load screenshot for add_village.')
         return
@@ -208,7 +198,7 @@ def _load_accounts_cfg():
 
 
 def switch_to_village(idx: int):
-    """Открыть Settings → Switch-Account → тап по слоту аккаунта idx ПРЯМОЙ координатой.
+    """Открыть портрет → Settings → Switch-Account → тап по слоту аккаунта idx ПРЯМОЙ координатой.
 
     Список аккаунтов — FLAG_SECURE (adb-скриншот чёрный), поэтому НЕ скриншотим и НЕ
     матчим «загрузился» (старый AHK-обход не работал). Слоты — на фикс-позициях
@@ -218,24 +208,22 @@ def switch_to_village(idx: int):
     coord = acfg['slots'].get(str(idx))
     if not coord:
         print(f'[ERROR] Invalid account slot index: {idx}')
-        return
-    main.rsleep(2)
-    tap((1534, 649))                          # открыть Settings
-    main.rsleep(1)
-    scr = imread_unicode(take_screenshot())
-    sw = match_one('switch_button.png', scr, SWITCH_BUTTON_ROI) if scr is not None else None
-    if not sw:
-        print('[WARN] Switch-Account button not found; aborting switch_to_village')
-        tap((1288, 96))
-        return
-    tap(sw)                                   # открыть список аккаунтов (FLAG_SECURE)
+        return False
+    from game_ui import open_account_switcher
+    if not open_account_switcher():
+        print('[WARN] Account navigation failed; switch cancelled')
+        return False
     # Список — FLAG_SECURE (adb-скриншот чёрный), проверить «загрузился» нельзя и не нужно
     # (старый AHK-обход не работал). Ждём загрузки и тапаем слот по ФИКС-координате.
     print(f'[ACCOUNTS] switching to slot {idx} at {tuple(coord)} (list wait {acfg["wait_list"]}s)')
     time.sleep(acfg['wait_list'])
+    main.pause_event.wait()
+    if main._check_stop():
+        return False
     tap(tuple(coord))                         # прямой тап по слоту аккаунта
     time.sleep(acfg['wait_switch'])           # ждём загрузки выбранного аккаунта
     dbg(f'Switched to Village_{idx}')
+    return True
 
 
 def prepare_accounts(start: int=1, count: int=None) -> int:

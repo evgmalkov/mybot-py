@@ -6,7 +6,8 @@ import digit_ocr
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 from paths import BASE_DIR as SCRIPT_DIR
-coords = {'Gold': (55, 117, 251, 161), 'Elixir': (60, 167, 261, 208), 'Dark Elixir': (73, 214, 183, 248)}
+from game_ui import UI
+coords = UI['loot']
 
 
 def extract_resources():

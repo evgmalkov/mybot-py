@@ -8,6 +8,8 @@ def ensure_home_base(max_wait=50):
     start_time = time.time()
 
     while time.time() - start_time < max_wait:
+        from game_ui import dismiss_welcome
+        dismiss_welcome()
         if detect_home_base():
             print('✅ Home base confirmed.')
             return True

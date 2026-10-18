@@ -1,0 +1,297 @@
+{
+  "resolution": [
+    1600,
+    900
+  ],
+  "threshold": 0.85,
+  "transition_timeout": 8,
+  "poll_interval": 0.4,
+  "markers": {
+    "home": {
+      "template": "ui_home_build.png",
+      "roi": [
+        1400,
+        720,
+        1595,
+        895
+      ]
+    },
+    "welcome": {
+      "template": "ui_welcome.png",
+      "roi": [
+        450,
+        65,
+        1150,
+        145
+      ]
+    },
+    "menu": {
+      "template": "ui_find_match.png",
+      "roi": [
+        80,
+        600,
+        465,
+        730
+      ]
+    },
+    "army": {
+      "template": "ui_army_contents.png",
+      "roi": [
+        1080,
+        140,
+        1280,
+        210
+      ]
+    },
+    "victory": {
+      "template": "ui_victory.png",
+      "roi": [
+        500,
+        100,
+        1100,
+        280
+      ]
+    },
+    "confirm_attack": {
+      "template": "ui_attack_confirm.png",
+      "roi": [
+        1250,
+        760,
+        1575,
+        840
+      ]
+    },
+    "battle_reward": {
+      "template": "ui_battle_reward.png",
+      "roi": [
+        450,
+        90,
+        1150,
+        200
+      ]
+    },
+    "event_currency": {
+      "template": "ui_event_currency.png",
+      "roi": [
+        1000,
+        530,
+        1260,
+        615
+      ]
+    },
+    "request": {
+      "template": "ui_request.png",
+      "roi": [
+        450,
+        50,
+        1150,
+        140
+      ]
+    },
+    "profile_menu": {
+      "template": "ui_profile_menu.png",
+      "roi": [
+        1355,
+        30,
+        1440,
+        115
+      ]
+    },
+    "account_settings": {
+      "template": "ui_account_switch.png",
+      "roi": [
+        1000,
+        125,
+        1100,
+        220
+      ]
+    }
+  },
+  "taps": {
+    "welcome_okay": [
+      817,
+      751
+    ],
+    "battle": [
+      105,
+      800
+    ],
+    "edit_army": [
+      185,
+      853
+    ],
+    "close_army": [
+      1545,
+      81
+    ],
+    "close_menu": [
+      1100,
+      700
+    ],
+    "find_match": [
+      272,
+      659
+    ],
+    "confirm_attack": [
+      1445,
+      804
+    ],
+    "next": [
+      1432,
+      637
+    ],
+    "return_home": [
+      788,
+      768
+    ],
+    "event_currency": [
+      1120,
+      560
+    ],
+    "recipes": [
+      777,
+      90
+    ],
+    "my_army": [
+      320,
+      90
+    ],
+    "player_profile": [
+      80,
+      80
+    ],
+    "profile_settings": [
+      1260,
+      75
+    ],
+    "account_switch": [
+      1055,
+      170
+    ],
+    "profile_close": [
+      1400,
+      70
+    ]
+  },
+  "loot": {
+    "Gold": [
+      55,
+      117,
+      251,
+      161
+    ],
+    "Elixir": [
+      60,
+      167,
+      261,
+      208
+    ],
+    "Dark Elixir": [
+      73,
+      214,
+      183,
+      248
+    ]
+  },
+  "troop_bar": [
+    0,
+    710,
+    1600,
+    890
+  ],
+  "troop_threshold": 0.8,
+  "tab_offsets": {
+    "warden": [
+      -16,
+      0
+    ],
+    "bk": [
+      -16,
+      0
+    ],
+    "queen": [
+      -20,
+      12
+    ],
+    "duke": [
+      -20,
+      12
+    ],
+    "rc": [
+      -4,
+      0
+    ],
+    "empty_siege": [
+      28,
+      0
+    ],
+    "siege_with_troops": [
+      28,
+      0
+    ]
+  },
+  "max_mean_difference": 30,
+  "result_loot": {
+    "base": [
+      [
+        580,
+        394,
+        836,
+        435
+      ],
+      [
+        580,
+        455,
+        836,
+        495
+      ],
+      [
+        650,
+        514,
+        836,
+        553
+      ]
+    ],
+    "bonus": [
+      [
+        1155,
+        442,
+        1255,
+        470
+      ],
+      [
+        1155,
+        489,
+        1255,
+        516
+      ],
+      [
+        1183,
+        536,
+        1255,
+        563
+      ]
+    ]
+  },
+  "next_threshold": 0.85,
+  "tab_shift_tolerance": 5,
+  "tab_shift_min": 20,
+  "recipe_slots": {
+    "1": [
+      1364,
+      189,
+      1574,
+      275
+    ],
+    "2": [
+      1368,
+      455,
+      1572,
+      540
+    ]
+  },
+  "reward_timeout": 15,
+  "result_settle_sec": 3,
+  "remaining_sweep_interval_sec": 8,
+  "remaining_min_value": 120
+}

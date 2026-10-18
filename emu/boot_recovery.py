@@ -117,9 +117,6 @@ def boot_recovery():
     launch_app(host, 'com.supercell.clashofclans', check=False)
     print('⏳ Waiting 10 seconds for game to load...')
     main.rsleep(10)
-    print('👆 Dismissing pop-ups…')
-    try:
-        subprocess.run([ADB_BIN, '-s', host, 'shell', 'input', 'tap', '146', '487'],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, creationflags=CREATE_NO_WINDOW)
-    except Exception:
-        pass
+    from game_ui import dismiss_welcome
+    dismiss_welcome()
+    main.dismiss_star_bonus()

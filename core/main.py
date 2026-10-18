@@ -141,7 +141,8 @@ for tpl in (NEXT_BTN_TEMPLATE, END_BATTLE_TEMPLATE):
     print(f'❌ Template not found: {tpl}')
     sys.exit(1)
 NEXT_BTN_REGION = (1291, 563, 1592, 721)
-NEXT_THRESH = 0.35
+from game_ui import UI
+NEXT_THRESH = UI['next_threshold']
 MAX_WAIT_BATTLE = 170
 _cycle_count = 0
 _saved_wall_offset = None
@@ -157,15 +158,24 @@ def return_home():
     run_adb(['shell', 'input', 'tap', '788', '768'])
     rsleep(3)
 def search_attack():
-    """Equivalent to search_attack.bat."""
-    run_adb(['shell', 'input', 'tap', '113', '797'])
-    rsleep(0.7)
-    run_adb(['shell', 'input', 'tap', '272', '659'])
-    rsleep(0.7)
-    run_adb(['shell', 'input', 'tap', '1445', '804'])
+    """Поиск с подтверждением каждого экрана до следующего тапа."""
+    from game_ui import open_battle_menu, tap_named, wait_visible
+    if not open_battle_menu():
+        return False
+    tap_named('find_match')
+    if not wait_visible('confirm_attack'):
+        return False
+    tap_named('confirm_attack')
+    return True
+
+
 def search_next():
-    """Equivalent to search_next.bat → tap 1432 637."""
-    run_adb(['shell', 'input', 'tap', '1432', '637'])
+    from game_ui import tap_named
+    if not is_next_button_present():
+        return False
+    tap_named('next')
+    return True
+
 def _sorted_box(tl, br):
     x1, x2 = sorted([tl[0], br[0]])
     y1, y2 = sorted([tl[1], br[1]])
@@ -626,7 +636,6 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
                                                 print('[CC] Attack-ready timeout → boot-recover and restart Clan Capital flow (one-time).')
                                                 boot_recovery()
                                                 ensure_home_base()
-                                                tap(140, 606)
                                                 rsleep(0.6)
                                                 return clan_capital(cfg, threshold=threshold, _restart_depth=_restart_depth + 1)
                                             else:
@@ -665,7 +674,6 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
                                         print('[CC] Attack-ready timeout → boot-recover and restart Clan Capital flow (one-time).')
                                         boot_recovery()
                                         ensure_home_base()
-                                        tap(140, 606)
                                         rsleep(0.6)
                                         return clan_capital(cfg, threshold=threshold, _restart_depth=_restart_depth + 1)
                                     else:
@@ -919,7 +927,6 @@ def clan_capital_phase4(selected_village: str, prev_img=None, threshold_pct: int
         print(f'[CC P4] ❌ attack-ready timeout after {MAX_READY_POLLS} tries → rebooting and restarting CC')
         boot_recovery()
         ensure_home_base()
-        tap(140, 606)
         rsleep(0.6)
         return {'status': 'attack_ready_timeout', 'troops_found': [], 'spells_found': [], 'drops_done': {'spells': 0, 'troops': 0}, 'attempts': attempts}
     else:
@@ -1500,27 +1507,26 @@ def _load_event_reward_cfg():
 
 
 def pick_event_reward() -> bool:
-    """EVENT-ONLY: экран выбора награды в КОНЦЕ боя (Victory 3★) — тап по КРАЙНЕЙ ПРАВОЙ карточке
-    (Dark Elixir). После 1 тапа появляется кнопка завершения боя и обычный флоу продолжается.
-
-    Триггер — НАЛИЧИЕ ТЕКСТА 'Dark Elixir' в правой карточке (не общий баннер!), т.к. во время боя
-    бывают ДРУГИЕ экраны награды (войско+золото), где справа НЕ Dark Elixir — их трогать нельзя.
-    Матч ~1.0 только на ресурсном экране, на боевом ~0.23. Тапает ТОЛЬКО при enabled И наличии
-    Dark Elixir (бывает только в ивенте). Возвращает True, если награда выбрана (тап сделан)."""
+    """Выбрать Dark Elixir по подписи карточки только на экране победы."""
+    from game_ui import visible
     cfg = _load_event_reward_cfg()
     if not cfg['enabled']:
         return False
     img = capture_array()
-    if img is None:
+    if img is None or not visible('victory', img):
         return False
-    tpl = os.path.join(TEMPLATE_DIR, cfg['template'])
-    score, _, _ = _match_template(img, tpl, region=cfg['region'], thresh=cfg['thresh'])
-    if score >= cfg['thresh']:
-        print('\n🎁 Event reward (3-star) — picking Dark Elixir (right card)')
-        tap(*cfg['card_xy'])
-        rsleep(1.5)
-        return True
-    return False
+    x1, y1, x2, y2 = cfg['region']
+    tpl = load_template(os.path.join(TEMPLATE_DIR, cfg['template']), cv2.IMREAD_COLOR)
+    roi = img[y1:y2, x1:x2]
+    if tpl is None or any(a < b for a, b in zip(roi.shape[:2], tpl.shape[:2])):
+        return False
+    _, score, _, loc = cv2.minMaxLoc(cv2.matchTemplate(roi, tpl, cv2.TM_CCOEFF_NORMED))
+    if score < cfg['thresh']:
+        return False
+    tap(x1 + loc[0] + tpl.shape[1] // 2, y1 + loc[1] + tpl.shape[0] // 2)
+    print('[REWARD] Selected Dark Elixir card')
+    rsleep(1.5)
+    return True
 
 
 def wait_battle_end():
@@ -1648,7 +1654,8 @@ def get_stars_from_screen() -> int:
                     return 2
 def gain_resources(stars: int) -> tuple[int, int, int]:
     """\nRead the GOLD / ELIXIR / DARK-ELIXIR gained on the battle-end screen.\n\nReturns (gold, elixir, dark_elixir), each an *int*.\nIf OCR fails on any field, that field falls back to 0.\n"""
-    rsleep(0.5)
+    from game_ui import UI
+    rsleep(UI['result_settle_sec'], jitter=0)
     img = capture_array()
     if img is None:
         return (0, 0, 0)
@@ -1656,16 +1663,11 @@ def gain_resources(stars: int) -> tuple[int, int, int]:
         def _read(x1, y1, x2, y2) -> int:
             """Число внутри ROI (digit_ocr) или 0."""
             return digit_ocr.read_int(img[y1:y2, x1:x2]) or 0
-        gold_left = _read(586, 372, 825, 420)
-        elixir_left = _read(590, 431, 827, 482)
-        de_left = _read(643, 489, 826, 539)
-        if stars > 0:
-            gold_right = _read(1012, 444, 1176, 490)
-            elixir_right = _read(1016, 493, 1176, 537)
-            de_right = _read(1036, 541, 1176, 584)
-        else:
-            gold_right = elixir_right = de_right = 0
-        return (gold_left + gold_right, elixir_left + elixir_right, de_left + de_right)
+        from game_ui import UI
+        base = [_read(*box) for box in UI['result_loot']['base']]
+        bonus = [_read(*box) for box in UI['result_loot']['bonus']] if stars > 0 else [0, 0, 0]
+        return tuple(a + b for a, b in zip(base, bonus))
+
 def zero_all_stats_files() -> None:
     """\nOverwrite profiles/Village_<n>_stats.json (n = 1..MAX_VILLAGES)\nwith an all-zero dictionary.\n"""
     zeroed = {'gold': 0, 'elixir': 0, 'de': 0, 'attacks': 0, 'stars': {'0': 0, '1': 0, '2': 0, '3': 0}, 'last_update_ts': 0}
@@ -1914,7 +1916,6 @@ def one_cycle(cfg):
     pause_event.wait()
     ensure_home_base()
     dismiss_star_bonus()                  # закрыть 'Star Bonus received!', если перекрыл экран
-    tap(140, 606)
     if connection_popup_visible():
         print('[WARN] Connection lost → recovering')
         boot_recovery()
@@ -1953,7 +1954,6 @@ def one_cycle(cfg):
             pause_event.wait()
             print('[CC] Ensuring home base…')
             ensure_home_base()
-            tap(140, 606)
             rsleep(0.5)
             print('[CC] Zooming out for next CC run…')
             pause_event.wait()
@@ -1981,11 +1981,13 @@ def one_cycle(cfg):
         print('[quick_train] using quick train to cook army.')
         if _cycle_count % 5 == 0:
             pause_event.wait()
-            quick_train(cfg['quick_slot'])
+            if not quick_train(cfg['quick_slot']):
+                return
     else:
         if _cycle_count % 3 == 0:
             pause_event.wait()
-            smart_train(cfg)
+            if not smart_train(cfg):
+                return
     pause_event.wait()
     if connection_popup_visible():
         print('[WARN] Connection lost → recovering')
@@ -2029,7 +2031,9 @@ def one_cycle(cfg):
     print(f"[INFO] Search criteria -> Gold ≥ {cfg['gold_threshold']}, Elixir ≥ {cfg['elixir_threshold']}")
     print('[INFO] Searching for base to attack...')
     pause_event.wait()
-    search_attack()
+    if not search_attack():
+        print('[UI] Search navigation failed; cycle cancelled')
+        return
     pause_event.wait()
     while not _check_stop():
         pause_event.wait()
@@ -2122,7 +2126,6 @@ def bot_loop(cfg):
     setup_emulator()
     pause_event.wait()
     ensure_home_base()
-    tap(140, 606)
     rsleep(2)
     # После запуска игры (в т.ч. после вылета) на домашнем экране мог остаться ивент-экран
     # награды или 'Star Bonus received!' — прожать/закрыть до входа в основной цикл.
@@ -2134,7 +2137,6 @@ def bot_loop(cfg):
         print('Connection lost detected—recovering…')
         boot_recovery()
         ensure_home_base()
-        tap(140, 606)
         rsleep(2)
         if event_reward_present():       # рекавери = перезапуск игры → снова возможен ивент-экран
             claim_event_cards()
@@ -2223,12 +2225,10 @@ def bot_loop(cfg):
                 pause_event.wait()
                 ensure_home_base()
                 pause_event.wait()
-                tap(140, 606)
                 rsleep(3)
                 existing_count = accounts_count
             pause_event.wait()
             ensure_home_base()
-            tap(140, 606)
             print(f'[INFO] → Switching to Village_{idx}')
             bridge.setActiveVillage.emit(idx)
             try:
@@ -2243,7 +2243,9 @@ def bot_loop(cfg):
                         print(f'[WARN] Village_{idx}: no binding in accounts.json -> staying on current instance')
                 else:
                     # Модель A: переключение Supercell ID тапами по слотам (FLAG_SECURE).
-                    switch_to_village(idx)
+                    if switch_to_village(idx) is False:
+                        print('[ERROR] Account navigation failed; stopping account loop')
+                        return
             except Exception as e:
                 # Переключение аккаунтов ненадёжно (FLAG_SECURE / старт инстанса) —
                 # не роняем бота, продолжаем на текущем аккаунте.
@@ -2251,7 +2253,6 @@ def bot_loop(cfg):
             rsleep(5)
             pause_event.wait()
             ensure_home_base()
-            tap(140, 606)
             _saved_wall_offset = None
             wall_save = False
             cfg['current_village_idx'] = idx
