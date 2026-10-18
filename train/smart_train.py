@@ -147,8 +147,8 @@ def _validate_spells() -> bool:
 def _validate_siege() -> bool:
     shot = imread_unicode(take_screenshot(), cv2.IMREAD_COLOR)
     roi = _roi(shot, *SIEGE_ROI)
-    ok, _, _ = _match('slammer', roi, 0.92, subdir='Siege Machines')
-    return ok
+    return any(_match(name, roi, 0.8, subdir='Siege Machines')[0]
+               for name in os.listdir(SIEGE_DIR) if name.lower().endswith(PNG_EXT))
 
 
 def _tap_icon_in_tab(name: str, count: int):
@@ -401,38 +401,15 @@ Mirrors train_troops/train_spells structure.
 
 
 def _validate_army_window():
-    """
-Tap the Army button, wait, then confirm the Army window is open
-by template‐matching 'army_window.png' in the given ROI.
-Returns True if match ≥0.90, False otherwise.
-"""
-    OPEN_ARMY_WINDOW = (62, 658)
-    tap(OPEN_ARMY_WINDOW)
-    time.sleep(1)
-    shot = imread_unicode(take_screenshot(), cv2.IMREAD_COLOR)
-    if shot is None:
-        print('[WINDOW CHECK] failed to capture screenshot')
-        return False
-    army_roi = _roi(shot, 76, 57, 565, 156)
-    if DEBUG:
-        roi_path = os.path.join(BASE_DIR, 'debug_army_roi.png')
-        cv2.imwrite(roi_path, army_roi)
-        print(f'[DEBUG] saved army ROI to {roi_path}, shape={army_roi.shape}')
-    tpl_path = os.path.join(TEMPLATE_ROOT, 'army_window.png')
-    tpl = imread_unicode(tpl_path, cv2.IMREAD_COLOR)
-    if tpl is None:
-        print(f'[WINDOW CHECK] missing template {tpl_path}')
-        return False
-    res = cv2.matchTemplate(army_roi, tpl, cv2.TM_CCOEFF_NORMED)
-    _, max_val, _, _ = cv2.minMaxLoc(res)
-    print(f'[WINDOW CHECK] army window match score = {max_val:.3f}')
-    return max_val >= 0.6
+    """Открыть My Army через актуальное меню Battle и подтвердить содержимое."""
+    from game_ui import open_army
+    return open_army()
 
 
 def smart_train(cfg):
     if not _validate_army_window():
         print('[SMART] Army window not detected – skipping Army training')
-        return None
+        return False
     print('Army window detected')
     # MBR-CSV/неизвестная стратегия: состав войск не задан в ARMY_SETS (ключ вида "csv:<имя>").
     # Не трогаем войска (ожидается заранее собранная под стратегию армия), тренируем только
@@ -457,9 +434,13 @@ def smart_train(cfg):
     train_spells(cfg)
     if not _validate_siege():
         train_slammer()
+    ready = (not known_army or _validate_troops(cfg)) and _validate_spells() and _validate_siege()
+    if not ready:
+        print('[SMART] Army verification failed; attack cancelled')
     print('[SMART] Training complete – closing Army tab')
-    tap(CLOSE_ARMY_WINDOW)
-    time.sleep(1)
+    from game_ui import close_army
+    closed = close_army()
+    return ready and closed
 
 
 if __name__ == '__main__':

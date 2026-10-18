@@ -25,7 +25,7 @@ _VER_RE = re.compile(r"__version__\s*=\s*['\"]([0-9]+(?:\.[0-9]+)*)['\"]")
 # Бесшовное обновление: качаем zip репо и накладываем поверх установки. НЕ трогаем данные
 # пользователя — эти каталоги верхнего уровня сохраняем как есть, а существующие config/*.json
 # не перезаписываем (новые ключи имеют дефолты в коде; новые config-файлы добавляются).
-_PRESERVE_TOP = {'profiles', 'runtime', '.git', '__pycache__', '.claude', 'docs'}
+_PRESERVE_TOP = {'profiles', 'runtime', '__pycache__', 'docs'}
 
 
 def _apply_tree(src, dst):
@@ -35,7 +35,7 @@ def _apply_tree(src, dst):
     for root, dirs, files in os.walk(src):
         rel = os.path.relpath(root, src)
         parts = [] if rel == '.' else rel.split(os.sep)
-        if parts and parts[0] in _PRESERVE_TOP:
+        if parts and (parts[0] in _PRESERVE_TOP or parts[0].startswith('.')):
             dirs[:] = []                          # не спускаемся в сохраняемые каталоги
             continue
         target_dir = os.path.join(dst, *parts) if parts else dst

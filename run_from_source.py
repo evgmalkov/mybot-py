@@ -44,7 +44,7 @@ os.chdir(HERE)
 
 if "--import-only" in sys.argv:
     import importlib
-    mods = ["ensure_home_base", "ldplayer_manager", "main", "bot_gui", "mods",
+    mods = ["main", "ensure_home_base", "ldplayer_manager", "bot_gui", "mods",
             "attacks.attacks"]
     ok = bad = 0
     for m in mods:

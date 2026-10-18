@@ -26,7 +26,8 @@ TM_NAMES = [
     "queen", "bk", "warden", "prince", "duke", "rc", "rage", "freeze","event_goblin", "azure_dragon", "ice_minion", "ice_golem"
 ]
 
-MATCH_THRESHOLD = 0.5
+from game_ui import UI
+MATCH_THRESHOLD = UI['troop_threshold']
 TABS: dict[str, tuple[int,int]] = {}
 
 # ───────────────────── coordinate presets ─────────────────────
@@ -38,7 +39,7 @@ DRAGON_L = [
 ]
 BALLOON_L = [
     (170,384), (214,348), (246,327), (270,306), (305,285), (345,255),
-    (368,238), (396,216), (417,201), (444,183), (486,1154), (534,122),
+    (368,238), (396,216), (417,201), (444,183), (486,154), (534,122),
     (345,255), (444,183), (368,238), (246,327), (417,201)
 ]
 RAGE_L   = [(549,353), (674,247), (797,317), (690,439), (777, 403)]
@@ -157,8 +158,9 @@ def _load_deploy_cfg():
         "debug_capture_deploy":    bool(d.get("debug_capture_deploy", False)),
         "native_calibration":      bool(d.get("native_calibration", False)),
         # Кнопка ускорения боя «1x» (правит без кода — игра двигает её после апдейтов).
-        "speed_button_xy":       tuple(d.get("speed_button_xy", [1535, 512])),
+        "speed_button_xy":       tuple(d.get("speed_button_xy", [1535, 440])),
         "speed_button_template": str(d.get("speed_button_template", "speed_button_1x.png")),
+        "speed_confirm_template": str(d["speed_confirm_template"]),
         "speed_button_thresh":   float(d.get("speed_button_thresh", 0.80)),
         "speed_button_pad":      tuple(d.get("speed_button_pad", [90, 60])),
     }
@@ -330,10 +332,18 @@ def _ensure_active() -> None:
     _guard_t[0] = now
     shot = capture_array()
     if shot is not None:
+        from game_ui import visible, handle_battle_reward
+        if visible('victory', shot):
+            raise _AttackAborted('victory reward screen')
+        if visible('battle_reward', shot):
+            if not handle_battle_reward(shot):
+                raise _AttackAborted('unresolved battle reward')
+            shot = capture_array()
+        _sync_tab_positions(shot)
         try:
             monitor_hero_hp(shot)           # герой при низком HP → прожать способность
-        except Exception:
-            pass
+        except (ValueError, KeyError, cv2.error) as exc:
+            print(f"[HERO] Monitoring failed: {exc}")
         # Позитивная проверка «мы ещё в бою» (Overall Damage в правом-нижнем). ВАЖНО: виджет
         # появляется НЕ сразу — в pre-deploy/старте боя его ещё нет (иначе ложно прервёт высадку).
         # Поэтому guard «вооружается»: прерываем ТОЛЬКО если боевой UI УЖЕ видели и он ПРОПАЛ
@@ -384,13 +394,43 @@ def find_tab(template_name: str, screenshot):
         print("[TPL] missing", path); return None
     if screenshot is None:
         return None
+    x1, y1, x2, y2 = UI['troop_bar']
+    screenshot = screenshot[y1:y2, x1:x2]
+    if tpl.shape[0] > screenshot.shape[0] or tpl.shape[1] > screenshot.shape[1]:
+        return None
     res = cv2.matchTemplate(screenshot, tpl, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, max_loc = cv2.minMaxLoc(res)
     if max_val < MATCH_THRESHOLD:
         print(f"[TPL] {template_name} not found ({max_val:.2f})")
         return None
     h,w = tpl.shape
-    return (max_loc[0] + w//2,  max_loc[1] + h//2)
+    dx, dy = UI.get('tab_offsets', {}).get(template_name, (0, 0))
+    return (x1 + max_loc[0] + w//2 + dx, y1 + max_loc[1] + h//2 + dy)
+
+
+def _sync_tab_positions(shot):
+    """Сдвиг панели после добавления ивент-войск: согласие двух заклинаний."""
+    global _last_selected
+    gray = cv2.cvtColor(shot, cv2.COLOR_BGR2GRAY)
+    shifts = []
+    for key in ('rage', 'freeze'):
+        if not TABS.get(key):
+            return
+        found = find_tab(key, gray)
+        if found is None:
+            return
+        shifts.append(found[0] - TABS[key][0])
+    if abs(shifts[0] - shifts[1]) > UI['tab_shift_tolerance']:
+        return
+    dx = round(sum(shifts) / len(shifts))
+    if abs(dx) < UI['tab_shift_min']:
+        return
+    for key, point in TABS.items():
+        if point:
+            TABS[key] = (point[0] + dx, point[1])
+    if _last_selected:
+        _last_selected = (_last_selected[0] + dx, _last_selected[1])
+    print(f'[UI] Troop bar shifted by {dx}px; positions updated')
 
 
 def update_tabs():
@@ -410,12 +450,14 @@ def update_tabs():
         tpl_path = os.path.join(TEMPLATE_DIR, f"{name}.png")
         tpl = load_template(tpl_path, cv2.IMREAD_GRAYSCALE)
 
-        res = cv2.matchTemplate(shot, tpl, cv2.TM_CCOEFF_NORMED)
+        x1, y1, x2, y2 = UI['troop_bar']
+        res = cv2.matchTemplate(shot[y1:y2, x1:x2], tpl, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(res)
         print(f"[DEBUG] {name}: max match = {max_val:.3f}")
         if max_val >= MATCH_THRESHOLD:
             h, w = tpl.shape
-            coord = (max_loc[0] + w//2, max_loc[1] + h//2)
+            dx, dy = UI.get('tab_offsets', {}).get(name, (0, 0))
+            coord = (x1 + max_loc[0] + w//2 + dx, y1 + max_loc[1] + h//2 + dy)
         else:
             coord = None
         return coord, max_val
@@ -497,6 +539,7 @@ def _deploy_drag(pts):
 
 
 def deploy_troops(troop_key):
+    _ensure_active()
     tab = TABS.get(troop_key)
     if not tab:
         print("[SKIP] tab not found for", troop_key); return
@@ -531,6 +574,9 @@ def deploy_heroes():
     global _last_selected
     _last_selected = None                                   # во время высадки героев нечего восстанавливать
     for hero in DEPLOY_COORDS["heroes"]:
+        _ensure_active()
+        if hero["name"].lower() in _deployed_at:
+            continue
         tab = TABS.get(hero["name"].lower())
         if not tab:
             print("[SKIP] tab for", hero["name"]); continue
@@ -659,6 +705,7 @@ def _maybe_deploy_all_heroes():
 
 
 def deploy_spells(spell_key):
+    _ensure_active()
     tab = TABS.get(spell_key)
     if not tab:
         print("[SKIP] tab not found for", spell_key); return
@@ -685,31 +732,38 @@ def retap_heroes():
 # ───────────────────── battle speed-up ─────────────────────
 # Green "1x" button on the right side during battle. Tapping it cycles the battle speed
 # 1x → 2x → 3x → 4x. Позиция/порог/шаблон — в config/antiban.json (params-in-config): игра
-# двигала её после апдейтов (1512,507 → 1533,435 → 1535,512), правится без кода.
+# двигала её после апдейтов; центр области задаётся конфигом, тап — по найденной надписи.
 SPEED_BUTTON = tuple(DEPLOY_CFG["speed_button_xy"])
 # 'TRY AGAIN' centre within Templates/Connection_lost.png (977x296).
 TRY_AGAIN_OFFSET = (118, 247)
 CONN_THRESHOLD = 0.6
 _conn_tpl = None
 
-_speed_tpl = None
+_speed_tpl = {}
 
-def _speed_button_present(shot_bgr):
-    """True, если зелёная кнопка «1x» ускорения реально на экране — МАТЧИНГ эталона
-    speed_button_1x.png (надёжнее эвристики зелёного покрытия, которая ложно
-    срабатывала в начале боя, из-за чего бот «ускорял» пустоту)."""
-    global _speed_tpl
-    if _speed_tpl is None:
-        _speed_tpl = imread_unicode(os.path.join(TEMPLATE_DIR, DEPLOY_CFG["speed_button_template"]),
-                                    cv2.IMREAD_COLOR)
-    if _speed_tpl is None:
-        return False
+def _speed_button_position(shot_bgr, template_name=None):
+    """Найденный центр надписи «1x», либо None; фон кнопки не служит признаком."""
+    name = template_name or DEPLOY_CFG["speed_button_template"]
+    if name not in _speed_tpl:
+        _speed_tpl[name] = imread_unicode(os.path.join(TEMPLATE_DIR, name), cv2.IMREAD_COLOR)
+    template = _speed_tpl[name]
+    if template is None:
+        return None
     x, y = SPEED_BUTTON
     px, py = DEPLOY_CFG["speed_button_pad"]
     reg = shot_bgr[max(0, y - py):y + py, max(0, x - px):x + px]
-    if reg.shape[0] < _speed_tpl.shape[0] or reg.shape[1] < _speed_tpl.shape[1]:
-        return False
-    return float(cv2.matchTemplate(reg, _speed_tpl, cv2.TM_CCOEFF_NORMED).max()) >= DEPLOY_CFG["speed_button_thresh"]
+    if reg.shape[0] < template.shape[0] or reg.shape[1] < template.shape[1]:
+        return None
+    _, score, _, loc = cv2.minMaxLoc(cv2.matchTemplate(reg, template, cv2.TM_CCOEFF_NORMED))
+    if score < DEPLOY_CFG["speed_button_thresh"]:
+        return None
+    return (max(0, x - px) + loc[0] + template.shape[1] // 2,
+            max(0, y - py) + loc[1] + template.shape[0] // 2)
+
+
+def _speed_button_present(shot_bgr):
+    """Совместимость с проверками наличия кнопки."""
+    return _speed_button_position(shot_bgr) is not None
 
 def _handle_connection_lost(shot_gray):
     """If the 'Connection lost' popup is up (network dropped mid-attack), tap its
@@ -762,6 +816,7 @@ def _load_hero_cfg():
         d = {}
     _hero_cfg_cache = {
         "enabled": bool(d.get("enabled", True)),
+        "settle": float(d.get("deployment_settle_sec", 1.5)),
         "hp_threshold": float(d.get("hp_threshold", 0.30)),
         "cooldown": float(d.get("reactivate_cooldown_sec", 8)),
         "bar_y": tuple(d.get("bar_y", [717, 725])),
@@ -770,25 +825,26 @@ def _load_hero_cfg():
         "proactive": {s.lower() for s in d.get("proactive_heroes", ["warden"])},
         "proactive_delay": float(d.get("proactive_delay_sec", 4)),
         "debug": bool(d.get("debug", False)),
+        "fallback_delay": d["fallback_delay_sec"],
+        "fill_hsv": d["fill_hsv_ranges"],
+        "fill_rows": int(d["fill_min_rows"]),
     }
     return _hero_cfg_cache
 
 
 def _hero_hp_fraction(shot_bgr, cx, cfg):
-    """Доля заполнения HP-полоски героя (0..1) по зелёным столбцам в полосе бара.
-    Полоска зелёная на заполненной части и тёмная/красная на пустой; ширина зелёного
-    ≈ HP%. Возвращает долю столбцов бара, содержащих зелёные пиксели."""
+    """Доля яркой зелёной, жёлтой или красной заливки HP-полоски."""
     y0, y1 = cfg["bar_y"]
     x0, x1 = cx - cfg["half_w"], cx + cfg["half_w"]
     strip = shot_bgr[y0:y1, x0:x1]
     if strip.size == 0:
         return 0.0
-    b = strip[:, :, 0].astype("int16")
-    g = strip[:, :, 1].astype("int16")
-    r = strip[:, :, 2].astype("int16")
-    green = (g > 110) & (g - r > 25) & (g - b > 25)      # зелёный HP
-    col_has_green = green.any(axis=0)                     # столбец с зелёным
-    return float(col_has_green.mean())
+    hsv = cv2.cvtColor(strip, cv2.COLOR_BGR2HSV)
+    filled = np.zeros(strip.shape[:2], dtype=bool)
+    for lower, upper in cfg["fill_hsv"]:
+        filled |= cv2.inRange(hsv, np.array(lower), np.array(upper)) > 0
+    # Несколько строк отсекают красную рамку и одиночные блики.
+    return float((filled.sum(axis=0) >= cfg["fill_rows"]).mean())
 
 
 def _restore_selection():
@@ -821,6 +877,8 @@ def monitor_hero_hp(shot_bgr):
     done = 0                                              # герои «завершённые»: активирован ИЛИ мёртв
     for key in keys:
         tab = TABS[key]
+        if now - _deployed_at[key] < cfg["settle"]:
+            continue
         if key in _hero_last_activate:
             done += 1
             continue                                     # способность уже прожата — больше не трогаем
@@ -829,7 +887,8 @@ def monitor_hero_hp(shot_bgr):
         if key in cfg["proactive"]:
             if now - _deployed_at[key] >= cfg["proactive_delay"]:
                 print(f"[HERO] {key} proactive ability (+{cfg['proactive_delay']:.0f}s after deploy)")
-                run_adb(["shell", "input", "tap", *map(str, tab)])
+                if not run_adb(["shell", "input", "tap", *map(str, tab)]):
+                    continue
                 _hero_last_activate[key] = now
                 human_delay(0.2, 0.5)
                 _restore_selection()
@@ -843,39 +902,64 @@ def monitor_hero_hp(shot_bgr):
                 done += 1                                # подтверждённо мёртв/ушёл
             continue
         _hero_dead_count[key] = 0
-        if frac >= cfg["hp_threshold"]:
+        timed_out = now - _deployed_at[key] >= cfg["fallback_delay"][key]
+        if frac >= cfg["hp_threshold"] and not timed_out:
             continue                                     # HP в норме
-        print(f"[HERO] {key} HP low ({frac*100:.0f}%) → activating ability")
-        run_adb(["shell", "input", "tap", *map(str, tab)])
+        reason = "timer" if timed_out else "low HP"
+        print(f"[HERO] {key} {reason} ({frac*100:.0f}%) -> activating ability")
+        if not run_adb(["shell", "input", "tap", *map(str, tab)]):
+            continue
         _hero_last_activate[key] = now
         human_delay(0.2, 0.5)
         _restore_selection()                             # вернуть курсор на закл/войско
         done += 1
-    if done >= len(keys):
+    if done >= len(keys) and all(k in _deployed_at for k in _HERO_KEYS if TABS.get(k)):
         # все высаженные герои мертвы или уже активированы — дальше мониторить незачем
         _hero_monitor_done = True
         print("[HERO] all heroes dead or abilities used → stop monitoring")
 
 
 def speed_up(timeout=200):
-    """Wait for the '1x' speed button (only appears in the last minute), then tap
-    once -> x4. Meanwhile recovers from the 'Connection lost' popup, and stops
-    if the battle ends first (e.g. a fast 3-star)."""
+    """Ускорить бой один раз, продолжая следить за героями и остатками армии."""
+    global _deploy_phase
     print("\n→ Waiting for x4 speed button…")
     t0 = time.time()
+    sped_up = False
+    last_sweep = t0
     while time.time() - t0 < timeout:
+        _ensure_active()
         shot = capture_array()
         if shot is None:
             human_delay(1.4, 2.6); continue
         gray = cv2.cvtColor(shot, cv2.COLOR_BGR2GRAY)
         if _handle_connection_lost(gray):
             continue                              # popup handled; keep waiting
+        from game_ui import visible, handle_battle_reward
+        if visible('battle_reward', shot):
+            if not handle_battle_reward(shot):
+                return
+            continue
+        _sync_tab_positions(shot)
+        if visible('victory', shot):
+            print('[speed] Victory reward screen detected')
+            return
         monitor_hero_hp(shot)                     # #4: прожать способность героя при низком HP
         _maybe_deploy_all_heroes()                # по таймеру — добить всех невысаженных героев
-        if _speed_button_present(shot):
-            print("→ Speeding up battle (x4)")
-            run_adb(["shell", "input", "tap", str(SPEED_BUTTON[0]), str(SPEED_BUTTON[1])])
-            return
+        if time.time() - last_sweep >= UI['remaining_sweep_interval_sec']:
+            _deploy_phase = True
+            try:
+                deploy_all_remaining(max_rounds=1)
+            finally:
+                _deploy_phase = False
+            last_sweep = time.time()
+            continue
+        if not sped_up and _speed_button_position(shot, DEPLOY_CFG['speed_confirm_template']):
+            sped_up = True
+            print('[speed] 4x speed confirmed on screen')
+        button = _speed_button_position(shot) if not sped_up else None
+        if button:
+            print(f"[speed] Tapping 1x button at {button}")
+            run_adb(["shell", "input", "tap", *map(str, button)])
         try:
             if main.battle_ended():
                 print("[speed] battle already ended — nothing to speed up")
@@ -883,7 +967,7 @@ def speed_up(timeout=200):
         except Exception:
             pass
         human_delay(0.42, 0.78)                           # чаще опрашиваем — HP героев падает быстро
-    print("[speed] speed button did not appear within timeout")
+    print("[speed] Battle monitoring timeout reached")
 # ───────────────────── public API ─────────────────────
 
 def run_attack(cfg: dict|None = None):
@@ -960,7 +1044,10 @@ def run_attack(cfg: dict|None = None):
         traceback.print_exc()
     _deploy_phase = False                         # высадка окончена — в speed_up выбор не восстанавливаем
     # always try to speed up, even if a step above failed
-    speed_up()
+    try:
+        speed_up()
+    except _AttackAborted as exc:
+        print(f"[STOP] Battle monitoring stopped: {exc}")
     print("\n=== Attack script finished ===")
 
 # ───────────────────── sequences ─────────────────────
@@ -1011,10 +1098,10 @@ def _colored_slot_centers(shot_bgr):
     # теряло. Серый спущенный слот (x0) полностью монохромен → доля ~0 и он верно
     # отбрасывается, а любой доступный слот (даже бледный) даёт >порога.
     sat = strip[:, :, 1].astype(np.float32)
-    col_frac = (sat > 70).mean(axis=0)         # fraction of saturated px per column
+    col_frac = ((sat > 70) & (strip[:, :, 2] > UI['remaining_min_value'])).mean(axis=0)
     mask = col_frac > 0.10
     centers, x = [], 90                          # deploy bar spans ~x=90..1160;
-    W = min(shot_bgr.shape[1], 1160)             # ignore edges / right-side UI
+    W = min(shot_bgr.shape[1], UI['troop_bar'][2])
     while x < W:
         if mask[x]:
             x0 = x
@@ -1039,7 +1126,6 @@ def deploy_all_remaining(max_rounds=6):
     высадки бар меняется — иначе часть событийного войска остаётся невыпущенной.
     """
     global _last_selected
-    skip = [TABS[k][0] for k in PROTECTED_KEYS if TABS.get(k)]
     drop = DEPLOY_COORDS.get("dragon", [])[:12]
     print("\n→ Dumping all remaining troops (heroes & spells skipped)")
     for rnd in range(max_rounds):
@@ -1049,19 +1135,24 @@ def deploy_all_remaining(max_rounds=6):
             if shot is None:
                 print("[SKIP] deploy_all_remaining: no screenshot"); return
             # банки (jump/aggro/…) исключаем — не тратим их в добивающем сбросе
+            skip = [TABS[k][0] for k in PROTECTED_KEYS if TABS.get(k)]
             all_skip = skip + _protected_potion_centers(shot)
             centers = [cx for cx in _colored_slot_centers(shot)
                        if not any(abs(cx - c) < 55 for c in all_skip)]
             if not centers:
                 break                            # бар пуст — всё высажено
             print(f"   round {rnd + 1}: {len(centers)} slot(s) left")
+            anchor = TABS.get('rage')
             for cx in centers:
                 _ensure_active()
+                if anchor and TABS.get('rage'):
+                    cx += TABS['rage'][0] - anchor[0]
                 run_adb(["shell", "input", "tap", str(cx), str(SLOT_Y)])
                 _last_selected = (cx, SLOT_Y)
                 human_delay(0.15, 0.35)             # выбор слота — не мгновенно
                 pts = [jitterCoord(x, y) for x, y in drop]
                 for i in range(0, len(pts), DEPLOY_CHUNK):
+                    _ensure_active()
                     run_adb_taps(pts[i:i + DEPLOY_CHUNK])   # батч тапов — быстро
                     human_delay(*DEPLOY_CFG["drop_delay"])  # нерегулярный ритм
         except _AttackAborted:

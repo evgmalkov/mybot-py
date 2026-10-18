@@ -3,6 +3,29 @@
 All notable user-facing changes. The bot checks this file on startup and shows
 what's new when an update is available.
 
+## 1.4.11
+- Re-cut the Archer Queen and Dragon Duke battle-bar templates from the current
+  live game UI and center their detected tap/HP coordinates.
+
+## 1.4.10
+- Locate the updated speed button and confirm 4x on screen after tapping.
+- Open account switching through the player portrait and Settings, without
+  depending on Town Hall appearance; stop navigation when a screen is missing.
+
+## 1.4.9
+- Read green, yellow and red hero health bars; activate abilities on low HP or
+  a per-hero fallback timer, and continue monitoring after battle acceleration.
+- Fix an off-screen balloon drop point and periodically deploy remaining troops
+  across the full troop bar, including late event reinforcements.
+
+## 1.4.8
+- Updated army navigation, troop templates, resource HUD and battle-result reading
+  for the current game interface at 1600×900.
+- Confirm screen transitions before tapping; cancel attacks when army validation fails.
+- Track troop-bar shifts caused by event reinforcements, handle reward overlays,
+  and keep hero monitoring active until all deployed heroes are handled.
+- Updated saved recipes and fixed the import-only startup check.
+
 ## 1.4.7
 - Re-cut the Electro Dragon troop icon at the new army-window scale so the
   pre-attack army check works for Electro Dragon armies too (same UI-shrink fix

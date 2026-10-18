@@ -6,6 +6,7 @@ import time
 import numpy as np
 import main
 from ensure_home_base import ensure_home_base
+from game_ui import open_army, close_army, visible, wait_visible
 from boot_recovery import boot_recovery
 from adb_config import ADB_BIN
 from screenshot_utils import take_screenshot, load_template
@@ -19,7 +20,6 @@ CLAN_CAKE_TEMPLATE = os.path.join(TEMPLATE_DIR, 'clan_castle_cake.png')
 CLAN_TROOPS_SAVED = os.path.join(TEMPLATE_DIR, 'cc_no_troops.png')
 CLAN_CAKE_THRESH = 0.7
 REQUEST_THRESH = 0.95
-ARMY_BUTTON = (63, 653)
 REQUEST_BUTTON_TAP = (1491, 712)
 SEND_BUTTON = (970, 627)
 CLOSE_BUTTON = (1545, 84)
@@ -44,16 +44,7 @@ def tap(x, y):
 
 
 def get_header_text(img):
-    # Окно армии определяем матчингом заголовка «MY ARMY» (вместо OCR) — надёжнее.
-    x1, y1, x2, y2 = ARMY_WINDOW_REGION
-    tpl = load_template(MY_ARMY_HDR, cv2.IMREAD_GRAYSCALE)
-    if tpl is None:
-        return ''
-    roi = cv2.cvtColor(img[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
-    if roi.shape[0] < tpl.shape[0] or roi.shape[1] < tpl.shape[1]:
-        return ''
-    score = float(cv2.matchTemplate(roi, tpl, cv2.TM_CCOEFF_NORMED).max())
-    return 'MY ARMY' if score >= 0.7 else ''
+    return 'MY ARMY' if visible('army', img) else ''
 
 
 def is_request_button_present(img):
@@ -112,7 +103,7 @@ Cake ROI: (1245, 669) - (1418, 766). On hit (≥ CLAN_CAKE_THRESH) we:
             return False
     tap(993, 610)
     time.sleep(0.7)
-    tap(*CLOSE_BUTTON)
+    close_army()
     print('✅ Request sent.')
     return True
 
@@ -122,8 +113,8 @@ def auto_request():
         print('❌ Home base not detected.')
         return False
     print('✅ Home base confirmed.')
-    tap(*ARMY_BUTTON)
-    time.sleep(0.6)
+    if not open_army():
+        return False
     shot_path = adb_screenshot('request_troops.png')
     if not shot_path:
         print('❌ Screenshot failed.')
@@ -135,22 +126,24 @@ def auto_request():
     header = get_header_text(img)
     if not any((k in header for k in WINDOW_KEYWORDS)):
         print(f"❌ Army window not detected. OCR: '{header}'")
-        tap(*CLOSE_BUTTON)
+        close_army()
         return False
     print('✅ Army window detected!')
     print('▶ Checking Request button availability...')
     if not is_request_button_present(img):
         print('⚠️ Request not available')
-        tap(*CLOSE_BUTTON)
+        close_army()
         return False
     print('✅ Request available.')
     if is_castle_cake_avail(img):
         return True
     tap(*REQUEST_BUTTON_TAP)
-    time.sleep(0.7)
+    if not wait_visible('request'):
+        print('[REQUEST] Dialog not confirmed; request cancelled')
+        return False
     tap(*SEND_BUTTON)
     time.sleep(0.7)
-    tap(*CLOSE_BUTTON)
+    close_army()
     print('✅ Request sent.')
     return True
 
