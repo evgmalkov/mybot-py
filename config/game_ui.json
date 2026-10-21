@@ -201,6 +201,10 @@
   ],
   "troop_threshold": 0.8,
   "tab_offsets": {
+    "siege_selector": [
+      -22,
+      -48
+    ],
     "warden": [
       -16,
       0
@@ -228,6 +232,42 @@
     "siege_with_troops": [
       28,
       0
+    ],
+    "siege_wall_wrecker": [
+      -30,
+      8
+    ],
+    "siege_battle_blimp": [
+      -30,
+      8
+    ],
+    "siege_stone_slammer": [
+      -30,
+      8
+    ],
+    "siege_siege_barracks": [
+      -30,
+      8
+    ],
+    "siege_log_launcher": [
+      -30,
+      8
+    ],
+    "siege_flame_flinger": [
+      -30,
+      8
+    ],
+    "siege_battle_drill": [
+      -30,
+      8
+    ],
+    "siege_troop_launcher": [
+      -30,
+      8
+    ],
+    "siege_sky_wagon": [
+      -30,
+      8
     ]
   },
   "max_mean_difference": 30,
@@ -293,5 +333,17 @@
   "reward_timeout": 15,
   "result_settle_sec": 3,
   "remaining_sweep_interval_sec": 8,
-  "remaining_min_value": 120
+  "remaining_min_value": 120,
+  "siege_templates": [
+    "siege_selector",
+    "siege_wall_wrecker",
+    "siege_battle_blimp",
+    "siege_stone_slammer",
+    "siege_siege_barracks",
+    "siege_log_launcher",
+    "siege_flame_flinger",
+    "siege_battle_drill",
+    "siege_troop_launcher",
+    "siege_sky_wagon"
+  ]
 }

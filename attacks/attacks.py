@@ -22,7 +22,7 @@ SCREENSHOT_PATH = os.path.join(BASE_DIR, "toAttack.png")
 
 # ───────────────────── templates / tab names ─────────────────────
 TM_NAMES = [
-    "dragon", "E_Drag", "balloon", "siege_with_troops", "empty_siege",
+    "dragon", "E_Drag", "balloon",
     "queen", "bk", "warden", "prince", "duke", "rc", "rage", "freeze","event_goblin", "azure_dragon", "ice_minion", "ice_golem"
 ]
 
@@ -439,13 +439,13 @@ def update_tabs():
     if shot is None:
         return {}
 
-    # 1) detect everything (raw), including both siege templates
+    # Иконки войск и героев; варианты осады проверяем отдельно.
     raw: dict[str, tuple[int,int] | None] = {
         name.lower(): find_tab(name, shot)
         for name in TM_NAMES
     }
 
-    # 2) re-match siege templates to get their scores
+    # Ищем осаду только в боевой панели.
     def match_score(name: str) -> tuple[tuple[int,int] | None, float]:
         tpl_path = os.path.join(TEMPLATE_DIR, f"{name}.png")
         tpl = load_template(tpl_path, cv2.IMREAD_GRAYSCALE)
@@ -462,14 +462,10 @@ def update_tabs():
             coord = None
         return coord, max_val
 
-    swt_coord, swt_score = match_score("siege_with_troops")
-    es_coord,  es_score  = match_score("empty_siege")
-
-    # 3) pick the stronger one
-    if swt_coord and swt_score >= es_score:
-        siege_coord = swt_coord
-    else:
-        siege_coord = es_coord
+    # Кнопка смены машины сохраняется при разных портретах и значке «!».
+    # Смещение направляет тап в карточку, а не в саму кнопку выбора.
+    candidates = [match_score(name) for name in UI['siege_templates']]
+    siege_coord = max(candidates, key=lambda candidate: candidate[1])[0]
 
     # 4) build the final tabs dict
     tabs = {

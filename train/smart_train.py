@@ -130,7 +130,16 @@ def _validate_troops(cfg) -> bool:
     if not main_ok or not bal_ok:
         return False
     n, d = _read_fraction(_roi(shot, *SPACE_ROI))
-    return n == d and n != 0
+    return _troop_space_ready(n, d, spec)
+
+
+def _troop_space_ready(used, capacity, spec) -> bool:
+    """Остаток допустим, только если туда не помещается юнит выбранного состава."""
+    if (used is None or capacity is None
+            or not (120 <= capacity <= MAX_HOUSING and 0 < used <= capacity)):
+        return False
+    smallest = min(SPACE_COST[name] for name in spec['troops'])
+    return capacity - used < smallest
 
 
 def _validate_spells() -> bool:
@@ -240,9 +249,9 @@ def train_troops(cfg, shot=None):
             print('[SPACE CHECK] cannot read housing reliably → skip training this pass (avoid over-brew)')
             return None
     primary = spec['main']
-    # Готова, если состав верный И казармы полны (used==limit) — тогда не перетренировываем.
-    if composition_ok and used_now is not None and limit is not None and used_now == limit and used_now != 0:
-        print(f'[TRAIN] army full & composition ok ({used_now}/{limit}) — skipping training.')
+    # Учитываем незаполняемый остаток одинаково при тренировке и итоговой проверке.
+    if composition_ok and _troop_space_ready(used_now, limit, spec):
+        print(f'[TRAIN] army ready & composition ok ({used_now}/{limit}) — skipping training.')
         return None
     _clear_if_trash(TRASH_ARMY_ROI, TAP_CLEAR_ARMY, CONFIRM_TAP_ARMY)
     tap(OPEN_ARMY_TAB)
