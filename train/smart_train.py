@@ -14,7 +14,7 @@ Usage:
 Validates current army troops, spells, and siege; retrains missing or incorrect items
 using the COC Army window and ADB taps. Closes the Army tab upon success.
 """
-import os, sys, time, cv2, subprocess
+import os, sys, time, cv2, subprocess, json
 from typing import Tuple
 import numpy as np
 import main
@@ -161,13 +161,35 @@ def _validate_siege() -> bool:
 
 
 def _tap_icon_in_tab(name: str, count: int):
-    tab = imread_unicode(take_screenshot(), cv2.IMREAD_COLOR)
-    ok, _, center = _match(name, tab, 0.7, subdir='to_train')
-    if not ok:
-        print(f'[TRAIN] {name}.png not found in tab')
-    else:
-        for _ in range(count):
-            tap(center)
+    """Найти карточку только в панели выбора, прокручивая её в обе стороны."""
+    if count <= 0:
+        return True
+    with (BASE_DIR / 'config' / 'army.json').open(encoding='utf-8') as file:
+        picker = json.load(file)['picker']
+    x1, y1, x2, y2 = picker['roi']
+    for direction in ('swipe_left', 'swipe_right'):
+        for attempt in range(picker['max_swipes'] + 1):
+            main.pause_event.wait()
+            if main._check_stop():
+                return False
+            tab = imread_unicode(take_screenshot(), cv2.IMREAD_COLOR)
+            if tab is None:
+                return False
+            ok, _, center = _match(name, tab[y1:y2, x1:x2],
+                                   picker['threshold'], subdir='to_train')
+            if ok:
+                for _ in range(count):
+                    main.pause_event.wait()
+                    if main._check_stop():
+                        return False
+                    tap((x1 + center[0], y1 + center[1]))
+                    time.sleep(picker['tap_interval_sec'])
+                return True
+            if attempt < picker['max_swipes']:
+                main.run_adb(['shell', 'input', 'swipe', *map(str, picker[direction])])
+                time.sleep(picker['settle_sec'])
+    print(f'[TRAIN] {name}.png not found in scrolled picker')
+    return False
 
 
 def _measure_army_space_secondary(shot, roi_xyxy=(751, 183, 858, 230), template_dir=TEMPLATE_ROOT, threshold=0.9):
@@ -261,10 +283,10 @@ def train_troops(cfg, shot=None):
     main_cnt = main_space // main_cost
     bal_cnt = (limit - main_space) // SPACE_COST['balloon']
     print(f'[TRAIN] {main_cnt}×{main}, {bal_cnt}×balloon (limit={limit})')
-    _tap_icon_in_tab(main, main_cnt)
-    _tap_icon_in_tab('balloon', bal_cnt)
+    trained = _tap_icon_in_tab(main, main_cnt) and _tap_icon_in_tab('balloon', bal_cnt)
     tap(CLOSE_ARMY_TAB)
     time.sleep(1)
+    return trained
 
 
 SPELL_STATE_PATH = os.path.join(BASE_DIR, 'profiles', 'spell_state.json')
@@ -365,11 +387,13 @@ def train_spells(cfg, shot=None):
     tap(OPEN_SPELL_TAB)
     time.sleep(1)
     print(f"[TRAIN] {desired['rage']}×rage, {desired['freeze']}×freeze (from config/army.json)")
-    _tap_icon_in_tab('rage', desired['rage'])
-    _tap_icon_in_tab('freeze', desired['freeze'])
+    trained = _tap_icon_in_tab('rage', desired['rage']) and _tap_icon_in_tab('freeze', desired['freeze'])
     tap(CLOSE_SPELL_TAB)
     time.sleep(1)
-    _save_spell_state(desired)
+    if trained and _validate_spells():
+        _save_spell_state(desired)
+        return True
+    return False
 
 
 def train_slammer(cfg=None, shot=None):
@@ -427,7 +451,10 @@ def smart_train(cfg):
     if known_army:
         army_ok = _validate_troops(cfg)
         if not army_ok:
-            train_troops(cfg)
+            if train_troops(cfg) is False:
+                from game_ui import close_army
+                close_army()
+                return False
     elif str(cfg.get('attack', '')).startswith('csv:'):
         # MBR-CSV v1: авто-сборка армии не реализована (milestone-2). Явно логируем, чтобы пустая
         # армия на 2-й атаке диагностировалась как «нет auto-train», а не «CSV сломан».
@@ -440,7 +467,10 @@ def smart_train(cfg):
     # из config/army.json. Старый гейт _validate_spells проверял лишь НАЛИЧИЕ rage+freeze
     # и полноту места, из-за чего чужие/лишние заклы (ивентовые jump/heal и т.п.) не
     # пересобирались до нужного 4×rage/3×freeze.
-    train_spells(cfg)
+    if train_spells(cfg) is False:
+        from game_ui import close_army
+        close_army()
+        return False
     if not _validate_siege():
         train_slammer()
     ready = (not known_army or _validate_troops(cfg)) and _validate_spells() and _validate_siege()

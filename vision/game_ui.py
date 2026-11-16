@@ -107,6 +107,51 @@ def close_army():
     return wait_visible('home')
 
 
+def treasure_reward_visible(image=None):
+    """Сундук с оставшимися ударами или экран полученной награды."""
+    if image is None:
+        image = capture_array()
+    return any(visible(name, image) for name in
+               ('chest_hammer', 'reward_rolling_pin', 'reward_tap',
+                'chest_continue', 'food_continue'))
+
+
+def collect_treasure_rewards():
+    """Прожать видимые молотки/Continue, дожидаясь анимаций и возврата домой."""
+    import main
+    deadline = time.monotonic() + UI['chest_timeout']
+    home_since = None
+    while time.monotonic() < deadline:
+        if main._check_stop():
+            return False
+        image = capture_array()
+        if visible('home', image):
+            if home_since is None:
+                home_since = time.monotonic()
+            if time.monotonic() - home_since >= UI['reward_home_settle_sec']:
+                print('[REWARD] Treasure rewards collected; home confirmed')
+                return True
+            time.sleep(UI['poll_interval'])
+            continue
+        home_since = None
+        if visible('chest_continue', image) or visible('food_continue', image):
+            action = 'chest_continue'
+        elif any(visible(name, image) for name in
+                 ('chest_hammer', 'reward_rolling_pin', 'reward_tap')):
+            action = 'chest_hit'
+        else:
+            # Между ударом, выдачей награды и следующим сундуком идут анимации.
+            # Неизвестный кадр не разрешает слепой тап.
+            time.sleep(UI['poll_interval'])
+            continue
+        if tap_named(action) is False:
+            return False
+        print(f'[REWARD] {action}')
+        time.sleep(UI['chest_tap_interval'])
+    print('[REWARD] Treasure reward transition timed out')
+    return False
+
+
 def handle_battle_reward(image):
     """Дождаться ухода ивент-окна; известную валюту выбрать по маркеру."""
     if not visible('battle_reward', image):

@@ -37,10 +37,10 @@
     "army": {
       "template": "ui_army_contents.png",
       "roi": [
-        1080,
-        140,
-        1280,
-        210
+        1070,
+        135,
+        1290,
+        220
       ]
     },
     "victory": {
@@ -105,6 +105,78 @@
         1100,
         220
       ]
+    },
+    "recipe_confirm": {
+      "template": "ui_recipe_confirm.png",
+      "roi": [
+        550,
+        230,
+        1050,
+        320
+      ]
+    },
+    "searching_opponent": {
+      "template": "ui_next_opponent.png",
+      "roi": [
+        1320,
+        575,
+        1595,
+        705
+      ]
+    },
+    "claim_chest": {
+      "template": "claim_reward.png",
+      "roi": [
+        650,
+        725,
+        950,
+        825
+      ]
+    },
+    "chest_hammer": {
+      "template": "ui_chest_hammer.png",
+      "roi": [
+        630,
+        710,
+        950,
+        800
+      ]
+    },
+    "chest_continue": {
+      "template": "ui_chest_continue.png",
+      "roi": [
+        690,
+        745,
+        940,
+        835
+      ]
+    },
+    "reward_rolling_pin": {
+      "template": "ui_reward_rolling_pin.png",
+      "roi": [
+        630,
+        710,
+        950,
+        800
+      ]
+    },
+    "reward_tap": {
+      "template": "ui_reward_tap.png",
+      "roi": [
+        700,
+        130,
+        850,
+        225
+      ]
+    },
+    "food_continue": {
+      "template": "ui_food_continue.png",
+      "roi": [
+        640,
+        720,
+        930,
+        830
+      ]
     }
   },
   "taps": {
@@ -125,8 +197,8 @@
       81
     ],
     "close_menu": [
-      1100,
-      700
+      1390,
+      590
     ],
     "find_match": [
       272,
@@ -171,6 +243,18 @@
     "profile_close": [
       1400,
       70
+    ],
+    "recipe_confirm": [
+      970,
+      580
+    ],
+    "chest_hit": [
+      790,
+      480
+    ],
+    "chest_continue": [
+      810,
+      790
     ]
   },
   "loot": {
@@ -324,10 +408,10 @@
       275
     ],
     "2": [
-      1368,
-      455,
-      1572,
-      540
+      1360,
+      495,
+      1575,
+      565
     ]
   },
   "reward_timeout": 15,
@@ -345,5 +429,8 @@
     "siege_battle_drill",
     "siege_troop_launcher",
     "siege_sky_wagon"
-  ]
+  ],
+  "chest_timeout": 60,
+  "chest_tap_interval": 1.2,
+  "reward_home_settle_sec": 3
 }

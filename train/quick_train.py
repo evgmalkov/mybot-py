@@ -3,16 +3,19 @@ import cv2
 import time
 from paths import BASE_DIR
 from screenshot_utils import capture_array, load_template
-from game_ui import UI, open_army, close_army, tap_named, wait_visible
+from game_ui import UI, open_army, close_army, tap_named, wait_visible, visible
 
 
 def quick_train(use_army: int) -> bool:
     region = UI['recipe_slots'].get(str(use_army))
     if region is None or not open_army():
         return False
-    tap_named('recipes')
+    if tap_named('recipes') is False:
+        return False
     time.sleep(UI['poll_interval'])
     image = capture_array()
+    if image is None:
+        return False
     template = load_template(str(BASE_DIR / 'Templates' / 'Smart_Auto_train' / 'use_button.png'), cv2.IMREAD_COLOR)
     x1, y1, x2, y2 = region
     roi = image[y1:y2, x1:x2]
@@ -26,9 +29,23 @@ def quick_train(use_army: int) -> bool:
         close_army()
         return False
     from smart_train import tap
-    tap((x1 + loc[0] + template.shape[1] // 2, y1 + loc[1] + template.shape[0] // 2))
-    # Текущий UI применяет рецепт сразу и открывает My Army, без подтверждения.
-    if not wait_visible('army'):
+    import main
+    main.pause_event.wait()
+    if main._check_stop():
         return False
-    print(f'[QUICK] Recipe {use_army} applied')
-    return close_army()
+    tap((x1 + loc[0] + template.shape[1] // 2, y1 + loc[1] + template.shape[0] // 2))
+    # При существующем подкреплении игра запрашивает подтверждение рецепта.
+    deadline = time.monotonic() + UI['transition_timeout']
+    while time.monotonic() < deadline:
+        if main._check_stop():
+            return False
+        image = capture_array()
+        if visible('recipe_confirm', image):
+            if tap_named('recipe_confirm') is False:
+                return False
+        elif visible('army', image):
+            print(f'[QUICK] Recipe {use_army} applied')
+            return close_army()
+        time.sleep(UI['poll_interval'])
+    print(f'[QUICK] Recipe {use_army} was not confirmed')
+    return False

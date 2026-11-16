@@ -154,19 +154,26 @@ def run_adb(cmd_args):
     """Run ADB with the given argument list silently."""
     subprocess.run([ADB_BIN, '-s', host, *cmd_args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
 def return_home():
-    """Equivalent to return_home.bat → tap 788 768."""
-    run_adb(['shell', 'input', 'tap', '788', '768'])
+    """Вернуться с результата боя, обработав сундуки Treasure Hunt."""
+    from game_ui import visible, tap_named, collect_treasure_rewards
+    chest = visible('claim_chest')
+    if tap_named('return_home') is False:
+        return False
+    if chest:
+        return collect_treasure_rewards()
     rsleep(3)
 def search_attack():
     """Поиск с подтверждением каждого экрана до следующего тапа."""
-    from game_ui import open_battle_menu, tap_named, wait_visible
-    if not open_battle_menu():
+    from game_ui import open_battle_menu, tap_named, wait_visible, visible
+    # После прерванного цикла окно подтверждения может быть уже открыто.
+    if not visible('confirm_attack'):
+        if not open_battle_menu():
+            return False
+        if tap_named('find_match') is False or not wait_visible('confirm_attack'):
+            return False
+    if tap_named('confirm_attack') is False:
         return False
-    tap_named('find_match')
-    if not wait_visible('confirm_attack'):
-        return False
-    tap_named('confirm_attack')
-    return True
+    return wait_visible('searching_opponent')
 
 
 def search_next():
@@ -1260,24 +1267,10 @@ def _match_template(img, tmpl_path, region, thresh):
                     cy = y1 + loc[1] + tmpl_gray.shape[0] // 2
                     return (score, cx, cy)
 def treasure_event():
-    hammer_tmpl = Path(TEMPLATE_DIR) / 'hammer.png'
-    continue_tmpl = Path(TEMPLATE_DIR) / 'continue.png'
-    print('Checking if treasure event is active. . .')
-    img = capture_array()
-    rsleep(0.2)
-    hammer_score, _, _ = _match_template(img, hammer_tmpl, region=(622, 710, 964, 809), thresh=0.8)
-    if hammer_score >= 0.8:
-        print('Treasure event detected.')
-        print('tapping. . . ')
-        for _ in range(4):
-            rsleep(0.2)
-            tap(273, 643)
-    else:
-        return None
-    rsleep(4)
-    print('Treasure open successfully.')
-    print('Going home. . .')
-    tap(788, 751)
+    from game_ui import treasure_reward_visible, collect_treasure_rewards
+    if treasure_reward_visible():
+        return collect_treasure_rewards()
+    return None
 def is_next_button_present() -> bool:
     """\nGrabs a fresh screenshot as \'is_next_button.png\' then\nchecks for the Next button via template matching.\n"""
     img = capture_array()
@@ -1414,6 +1407,9 @@ def event_reward_present() -> bool:
     img = capture_array()
     if img is None:
         return False
+    from game_ui import treasure_reward_visible
+    if treasure_reward_visible(img):
+        return True
     # Основной маркер — рамка карточки (ловит и промежуточный скретч-кадр, где нет ни
     # 'Tap!', ни 'Continue'). Плюс прямые совпадения 'Tap!'/'Continue' как быстрый путь.
     if _event_card_on_screen(img, _load_event_cfg()):
@@ -1457,6 +1453,9 @@ def claim_event_cards(max_loops=None):
     (несколько тапов по центру), затем показывается награда с кнопкой «Continue».
     Карточек может быть несколько. Обрабатываем по состоянию, пока есть Tap!/Continue,
     потом выходим (вернёмся на базу). Числа тапов/лимитов — из config/farming.json."""
+    from game_ui import treasure_reward_visible, collect_treasure_rewards
+    if treasure_reward_visible():
+        return collect_treasure_rewards()
     ecfg = _load_event_cfg()
     loops = ecfg['max_loops'] if max_loops is None else int(max_loops)
     _lo, _hi = ecfg['tap_delay_sec']
@@ -1911,7 +1910,8 @@ def one_cycle(cfg):
         _saved_wall_offset = None
         wall_save = False
         return
-    treasure_event()
+    if treasure_event() is False:
+        return
     transition_delay()                    # человекоподобная пауза между переходами (2–6с)
     pause_event.wait()
     ensure_home_base()
@@ -2097,7 +2097,8 @@ def one_cycle(cfg):
                 cfg['stats'] = stats
             else:
                 print(f"[{time.strftime('%H:%M:%S')}] [WORKER] ENABLE_STATS=False, skipping stats update")
-            return_home()
+            if return_home() is False:
+                return
             rsleep(2)                    # дать деревне прогрузиться перед проверкой поп-апов
             dismiss_star_bonus()         # после боя мог выпасть 'Star Bonus received!' — закрыть
             if event_reward_present():   # ивент бывает не всегда — входим только если он есть

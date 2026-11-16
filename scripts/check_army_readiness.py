@@ -14,6 +14,36 @@ import smart_train as s
 
 
 class ArmyReadiness(unittest.TestCase):
+    def test_picker_scrolls_instead_of_tapping_current_army(self):
+        template = s.imread_unicode(str(Path(s.TEMPLATE_ROOT) / 'to_train' / 'dragon.png'))
+        h, w = template.shape[:2]
+        upper = np.zeros((900, 1600, 3), dtype=np.uint8)
+        upper[250:250+h, 700:700+w] = template
+        picker = upper.copy()
+        picker[560:560+h, 600:600+w] = template
+        frames = iter((upper, picker))
+        original_read = s.imread_unicode
+        def read(path, *args):
+            return next(frames) if path == 'test-screen' else original_read(path, *args)
+        with patch.object(s, 'take_screenshot', return_value='test-screen'), \
+                patch.object(s, 'imread_unicode', side_effect=read), \
+                patch.object(s.time, 'sleep'), patch.object(main, 'run_adb') as swipe, \
+                patch.object(main, '_check_stop', return_value=False), patch.object(s, 'tap') as tap:
+            self.assertTrue(s._tap_icon_in_tab('dragon', 3))
+            swipe.assert_called_once()
+            self.assertEqual(tap.call_count, 3)
+            for args in tap.call_args_list:
+                self.assertEqual(args.args[0], (600+w//2, 560+h//2))
+
+    def test_failed_spell_picker_does_not_save_success(self):
+        shot = np.zeros((900, 1600, 3), dtype=np.uint8)
+        with patch.object(s, '_spell_config_changed', return_value=True), \
+                patch.object(s, '_clear_if_trash'), patch.object(s, 'tap'), \
+                patch.object(s.time, 'sleep'), patch.object(s, '_tap_icon_in_tab', return_value=False), \
+                patch.object(s, '_save_spell_state') as save:
+            self.assertFalse(s.train_spells({}, shot))
+            save.assert_not_called()
+
     def test_housing_boundaries(self):
         for spec in s.ARMY_SETS.values():
             for used, capacity, expected in (
