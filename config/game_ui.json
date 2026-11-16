@@ -432,5 +432,9 @@
   ],
   "chest_timeout": 60,
   "chest_tap_interval": 1.2,
-  "reward_home_settle_sec": 3
+  "reward_home_settle_sec": 3,
+  "home_recovery": {
+    "max_restarts": 1,
+    "poll_interval": 2
+  }
 }

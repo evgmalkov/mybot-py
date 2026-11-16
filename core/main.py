@@ -642,7 +642,8 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
                                             if st == 'attack_ready_timeout' and _restart_depth < 1:
                                                 print('[CC] Attack-ready timeout → boot-recover and restart Clan Capital flow (one-time).')
                                                 boot_recovery()
-                                                ensure_home_base()
+                                                if not ensure_home_base():
+                                                    return
                                                 rsleep(0.6)
                                                 return clan_capital(cfg, threshold=threshold, _restart_depth=_restart_depth + 1)
                                             else:
@@ -680,7 +681,8 @@ def clan_capital(cfg, threshold: float=CLAN_CAPITAL_THRESH, _restart_depth: int=
                                     if st == 'attack_ready_timeout' and _restart_depth < 1:
                                         print('[CC] Attack-ready timeout → boot-recover and restart Clan Capital flow (one-time).')
                                         boot_recovery()
-                                        ensure_home_base()
+                                        if not ensure_home_base():
+                                            return
                                         rsleep(0.6)
                                         return clan_capital(cfg, threshold=threshold, _restart_depth=_restart_depth + 1)
                                     else:
@@ -1914,7 +1916,8 @@ def one_cycle(cfg):
         return
     transition_delay()                    # человекоподобная пауза между переходами (2–6с)
     pause_event.wait()
-    ensure_home_base()
+    if not ensure_home_base():
+        return
     dismiss_star_bonus()                  # закрыть 'Star Bonus received!', если перекрыл экран
     if connection_popup_visible():
         print('[WARN] Connection lost → recovering')
@@ -1953,7 +1956,8 @@ def one_cycle(cfg):
                 break
             pause_event.wait()
             print('[CC] Ensuring home base…')
-            ensure_home_base()
+            if not ensure_home_base():
+                return
             rsleep(0.5)
             print('[CC] Zooming out for next CC run…')
             pause_event.wait()
@@ -2126,7 +2130,8 @@ def bot_loop(cfg):
         pass
     setup_emulator()
     pause_event.wait()
-    ensure_home_base()
+    if not ensure_home_base():
+        return
     rsleep(2)
     # После запуска игры (в т.ч. после вылета) на домашнем экране мог остаться ивент-экран
     # награды или 'Star Bonus received!' — прожать/закрыть до входа в основной цикл.
@@ -2137,7 +2142,8 @@ def bot_loop(cfg):
     if connection_popup_visible():
         print('Connection lost detected—recovering…')
         boot_recovery()
-        ensure_home_base()
+        if not ensure_home_base():
+            return
         rsleep(2)
         if event_reward_present():       # рекавери = перезапуск игры → снова возможен ивент-экран
             claim_event_cards()
@@ -2224,12 +2230,14 @@ def bot_loop(cfg):
                 print(f'[INFO] First setup: cleaning & ensuring home for Village_{idx}')
                 boot_recovery()
                 pause_event.wait()
-                ensure_home_base()
+                if not ensure_home_base():
+                    return
                 pause_event.wait()
                 rsleep(3)
                 existing_count = accounts_count
             pause_event.wait()
-            ensure_home_base()
+            if not ensure_home_base():
+                return
             print(f'[INFO] → Switching to Village_{idx}')
             bridge.setActiveVillage.emit(idx)
             try:
@@ -2253,7 +2261,8 @@ def bot_loop(cfg):
                 print(f'[WARN] switch to Village_{idx} failed: {e} — staying on current account')
             rsleep(5)
             pause_event.wait()
-            ensure_home_base()
+            if not ensure_home_base():
+                return
             _saved_wall_offset = None
             wall_save = False
             cfg['current_village_idx'] = idx

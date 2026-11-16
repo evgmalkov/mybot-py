@@ -92,7 +92,22 @@ def _recover_emulator(host):
     print('[RECOVERY] emulator still offline after restart attempt.')
 
 
+_recovering = False
+
+
 def boot_recovery():
+    """Не входить повторно в восстановление при сбое захвата экрана награды."""
+    global _recovering
+    if _recovering or main._check_stop():
+        return False
+    _recovering = True
+    try:
+        return _boot_recovery()
+    finally:
+        _recovering = False
+
+
+def _boot_recovery():
     """Restarts the emulator (if it died) and Clash of Clans, then dismisses pop-ups."""
     host = main.host
     if not host:
@@ -117,6 +132,6 @@ def boot_recovery():
     launch_app(host, 'com.supercell.clashofclans', check=False)
     print('⏳ Waiting 10 seconds for game to load...')
     main.rsleep(10)
-    from game_ui import dismiss_welcome
+    from game_ui import dismiss_welcome, dismiss_pending_rewards
     dismiss_welcome()
-    main.dismiss_star_bonus()
+    return dismiss_pending_rewards()

@@ -116,6 +116,20 @@ def treasure_reward_visible(image=None):
                 'chest_continue', 'food_continue'))
 
 
+def dismiss_pending_rewards():
+    """Обработать награду, перекрывшую дом, в том числе после перезапуска."""
+    import main
+    if main._check_stop():
+        return False
+    if treasure_reward_visible():
+        return collect_treasure_rewards()
+    if main.event_reward_present():
+        main.claim_event_cards()
+        return not main._check_stop() and not main.event_reward_present()
+    main.dismiss_star_bonus()
+    return True
+
+
 def collect_treasure_rewards():
     """Прожать видимые молотки/Continue, дожидаясь анимаций и возврата домой."""
     import main

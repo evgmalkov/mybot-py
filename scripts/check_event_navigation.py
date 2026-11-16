@@ -13,10 +13,66 @@ import main
 import game_ui as ui
 import quick_train as quick
 import smart_train
+import ensure_home_base as home
+import boot_recovery as recovery
 import numpy as np
 
 
 class EventNavigation(unittest.TestCase):
+    def test_pending_treasure_uses_reward_handler(self):
+        with patch.object(main, '_check_stop', return_value=False), \
+                patch.object(ui, 'treasure_reward_visible', return_value=True), \
+                patch.object(ui, 'collect_treasure_rewards', return_value=True) as collect:
+            self.assertTrue(ui.dismiss_pending_rewards())
+            collect.assert_called_once()
+
+    def test_pending_legacy_cards_are_processed(self):
+        with patch.object(main, '_check_stop', return_value=False), \
+                patch.object(ui, 'treasure_reward_visible', return_value=False), \
+                patch.object(main, 'event_reward_present', side_effect=[True, False]), \
+                patch.object(main, 'claim_event_cards') as collect:
+            self.assertTrue(ui.dismiss_pending_rewards())
+            collect.assert_called_once()
+
+    def test_home_handles_delayed_reward_before_detection(self):
+        actions = []
+        with patch.object(ui, 'dismiss_welcome'), \
+                patch.object(ui, 'dismiss_pending_rewards', side_effect=lambda: actions.append('reward') or True), \
+                patch.object(home, 'detect_home_base', side_effect=lambda: actions.append('home') or actions.count('home') == 2), \
+                patch.object(main.stop_event, 'wait', return_value=False), \
+                patch.object(main, '_check_stop', return_value=False), patch.object(home, 'boot_recovery') as reboot:
+            self.assertTrue(home.ensure_home_base())
+            self.assertEqual(actions, ['reward', 'home', 'reward', 'home'])
+            reboot.assert_not_called()
+
+    def test_failed_reward_does_not_restart_game(self):
+        with patch.object(ui, 'dismiss_welcome'), patch.object(ui, 'dismiss_pending_rewards', return_value=False), \
+                patch.object(main, '_check_stop', return_value=False), patch.object(home, 'boot_recovery') as reboot:
+            self.assertFalse(home.ensure_home_base())
+            reboot.assert_not_called()
+
+    def test_unknown_screen_has_bounded_restarts(self):
+        with patch.object(home, 'boot_recovery', return_value=True) as reboot:
+            self.assertFalse(home.ensure_home_base(max_wait=0))
+            self.assertEqual(reboot.call_count, ui.UI['home_recovery']['max_restarts'])
+
+    def test_recovery_cannot_reenter_itself(self):
+        with patch.object(main, '_check_stop', return_value=False), \
+                patch.object(recovery, '_boot_recovery', side_effect=recovery.boot_recovery) as restart:
+            self.assertFalse(recovery.boot_recovery())
+            restart.assert_called_once()
+            self.assertFalse(recovery._recovering)
+
+    def test_restart_processes_pending_rewards(self):
+        with patch.object(main, 'host', 'test-device'), patch.object(main, '_check_stop', return_value=False), \
+                patch.object(recovery, '_device_online', return_value=True), \
+                patch.object(recovery, '_screencap_alive', return_value=True), \
+                patch.object(recovery.subprocess, 'run'), patch('app_launch.launch_app'), \
+                patch.object(main, 'rsleep'), patch.object(ui, 'dismiss_welcome'), \
+                patch.object(ui, 'dismiss_pending_rewards', return_value=True) as rewards:
+            self.assertTrue(recovery.boot_recovery())
+            rewards.assert_called_once()
+
     def test_reward_chain_survives_brief_home(self):
         frames = iter(['chest_hammer', 'animation', 'chest_continue', 'home',
                        'reward_tap', 'food_continue', 'home', 'home', 'home', 'home'])
