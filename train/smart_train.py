@@ -166,6 +166,8 @@ def _tap_icon_in_tab(name: str, count: int):
         return True
     with (BASE_DIR / 'config' / 'army.json').open(encoding='utf-8') as file:
         picker = json.load(file)['picker']
+    with (BASE_DIR / 'config' / 'training_navigation.json').open(encoding='utf-8') as file:
+        picker.update(json.load(file)['picker_stability'])
     x1, y1, x2, y2 = picker['roi']
     for direction in ('swipe_left', 'swipe_right'):
         for attempt in range(picker['max_swipes'] + 1):

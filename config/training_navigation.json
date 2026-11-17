@@ -1,0 +1,11 @@
+{
+  "army_marker": {
+    "template": "ui_army_contents.png",
+    "roi": [1330, 765, 1530, 840]
+  },
+  "picker_stability": {
+    "stability_timeout_sec": 8,
+    "stable_samples": 2,
+    "position_tolerance_px": 3
+  }
+}

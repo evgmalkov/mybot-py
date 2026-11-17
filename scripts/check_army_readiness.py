@@ -19,6 +19,7 @@ import game_ui
 class ArmyReadiness(unittest.TestCase):
     def test_picker_waits_for_motion_to_stop(self):
         picker = json.loads((BASE_DIR / 'config' / 'army.json').read_text(encoding='utf-8'))['picker']
+        picker.update(json.loads((BASE_DIR / 'config' / 'training_navigation.json').read_text(encoding='utf-8'))['picker_stability'])
         shot = np.zeros((900, 1600, 3), dtype=np.uint8)
         # Иконка движется после свайпа; использовать старую координату нельзя.
         positions = [(120, 90), (160, 90), (160, 90), (160, 90)]

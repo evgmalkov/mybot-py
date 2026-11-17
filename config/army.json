@@ -28,9 +28,6 @@
       500
     ],
     "settle_sec": 0.8,
-    "stability_timeout_sec": 8,
-    "stable_samples": 2,
-    "position_tolerance_px": 3,
     "tap_interval_sec": 0.15
   }
 }

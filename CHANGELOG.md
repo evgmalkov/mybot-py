@@ -3,6 +3,12 @@
 All notable user-facing changes. The bot checks this file on startup and shows
 what's new when an update is available.
 
+## 1.4.15
+- Wait for troop cards to stop moving before selecting them on LDPlayer.
+- Prepare the army before every attack in both normal and quick training modes.
+- Detect the army window independently of the Boost Army button.
+- Deliver the new training navigation settings without overwriting existing user settings.
+
 ## 1.4.11
 - Re-cut the Archer Queen and Dragon Duke battle-bar templates from the current
   live game UI and center their detected tap/HP coordinates.

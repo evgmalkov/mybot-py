@@ -8,6 +8,11 @@ from screenshot_utils import capture_array, load_template
 with (BASE_DIR / 'config' / 'game_ui.json').open(encoding='utf-8') as _file:
     UI = json.load(_file)
 
+# Отдельный новый конфиг доставляется и установкам, где updater сохраняет
+# старый game_ui.json с областью прежней кнопки Boost Army.
+with (BASE_DIR / 'config' / 'training_navigation.json').open(encoding='utf-8') as _file:
+    UI['markers']['army'] = json.load(_file)['army_marker']
+
 
 def visible(name, image=None):
     """Проверить маркер только в его области и при ожидаемом разрешении."""
