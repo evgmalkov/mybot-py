@@ -178,6 +178,12 @@ def _tap_icon_in_tab(name: str, count: int):
             ok, _, center = _match(name, tab[y1:y2, x1:x2],
                                    picker['threshold'], subdir='to_train')
             if ok:
+                # После свайпа лента ещё движется по инерции. Координата с одного
+                # кадра может уже указывать на соседний юнит к моменту тапа.
+                center = _wait_picker_icon_stable(name, center, picker)
+                if center is None:
+                    print(f'[TRAIN] {name} picker did not settle; training cancelled')
+                    return False
                 for _ in range(count):
                     main.pause_event.wait()
                     if main._check_stop():
@@ -190,6 +196,31 @@ def _tap_icon_in_tab(name: str, count: int):
                 time.sleep(picker['settle_sec'])
     print(f'[TRAIN] {name}.png not found in scrolled picker')
     return False
+
+
+def _wait_picker_icon_stable(name, center, picker):
+    """Подтвердить неподвижную карточку свежими кадрами перед серией тапов."""
+    x1, y1, x2, y2 = picker['roi']
+    deadline = time.monotonic() + picker['stability_timeout_sec']
+    stable = 0
+    while time.monotonic() < deadline:
+        main.pause_event.wait()
+        if main._check_stop():
+            return None
+        time.sleep(picker['settle_sec'])
+        tab = imread_unicode(take_screenshot(), cv2.IMREAD_COLOR)
+        if tab is None:
+            return None
+        ok, _, current = _match(name, tab[y1:y2, x1:x2],
+                                picker['threshold'], subdir='to_train')
+        if ok and center is not None and max(abs(a-b) for a, b in zip(center, current)) <= picker['position_tolerance_px']:
+            stable += 1
+            if stable >= picker['stable_samples']:
+                return current
+        else:
+            stable = 0
+        center = current if ok else None
+    return None
 
 
 def _measure_army_space_secondary(shot, roi_xyxy=(751, 183, 858, 230), template_dir=TEMPLATE_ROOT, threshold=0.9):

@@ -4,7 +4,8 @@
 здесь не хранятся. Области поиска и координаты — в `config/game_ui.json`.
 
 `ui_recipe_confirm.png` — подтверждение использования сохранённого рецепта.
-`ui_army_contents.png` — маркер открытой армии (надпись Boost Army).
+`ui_army_contents.png` — маркер открытой армии (надпись Battle справа внизу,
+кроп из LDPlayer 1600×900). Проверка не зависит от состояния кнопки Boost Army.
 `ui_next_opponent.png` — подтверждение успешного перехода к противнику.
 `claim_reward.png` — получение сундука на экране результата боя.
 `ui_chest_hammer.png`, `ui_chest_continue.png` — сундук Treasure Hunt.

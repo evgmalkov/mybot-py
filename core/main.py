@@ -1983,15 +1983,11 @@ def one_cycle(cfg):
     if cfg['train_mode'] == 'quick':
         pause_event.wait()
         print('[quick_train] using quick train to cook army.')
-        if _cycle_count % 5 == 0:
-            pause_event.wait()
-            if not quick_train(cfg['quick_slot']):
-                return
+        if not quick_train(cfg['quick_slot']):
+            return
     else:
-        if _cycle_count % 3 == 0:
-            pause_event.wait()
-            if not smart_train(cfg):
-                return
+        if not smart_train(cfg):
+            return
     pause_event.wait()
     if connection_popup_visible():
         print('[WARN] Connection lost → recovering')
